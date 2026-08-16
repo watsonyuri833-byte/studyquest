@@ -252,11 +252,22 @@ class DatabaseManager:
   def remover_materia_edital(self, perfil="Watson", concurso_nome="", materia=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
+        # Remove do edital_config
         cursor.execute(
             "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome ="
             " %s AND materia = %s",
             (perfil, concurso_nome.strip(), materia.strip()),
         )
+        # Remove também as questões associadas para evitar ressurgimento automático
+        cursor.execute(
+            "SELECT id FROM questoes WHERE perfil = %s AND cargo = %s AND materia = %s",
+            (perfil, concurso_nome.strip(), materia.strip())
+        )
+        q_ids = [row[0] for row in cursor.fetchall()]
+        for q_id in q_ids:
+          cursor.execute("DELETE FROM historico_respostas WHERE questao_id = %s", (q_id,))
+          cursor.execute("DELETE FROM questoes WHERE id = %s", (q_id,))
+        
         conn.commit()
     st.cache_data.clear()
 
