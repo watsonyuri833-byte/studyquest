@@ -1,0 +1,889 @@
+import datetime
+import os
+import re
+import sqlite3
+from google import genai
+from google.genai import types
+from PIL import Image
+import streamlit as st
+
+# ==============================================================================
+# CONFIGURAÇÃO DA PÁGINA DO STREAMLIT
+# ==============================================================================
+st.set_page_config(
+    page_title="StudyQuest Pro — Modern Analytics",
+    page_icon="⚡",
+    layout="wide",
+)
+
+# ==============================================================================
+# CONFIGURAÇÃO DA API DO GEMINI
+# ==============================================================================
+# Configuração segura da API do Gemini para a nuvem
+if "GEMINI_API_KEY" in st.secrets:
+  os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+else:
+  # Caso queira rodar localmente com a chave fixa de fallback
+  os.environ["GEMINI_API_KEY"] = ""
+  
+
+DB_NAME = "questoes_estudo.db"
+
+
+# ==============================================================================
+# BACKEND: GERENCIADOR DO BANCO DE DADOS E IA
+# ==============================================================================
+class DatabaseManager:
+
+  def __init__(self, db_path=DB_NAME):
+    self.db_path = db_path
+    self.init_db()
+
+  def get_connection(self):
+    return sqlite3.connect(self.db_path)
+
+  def init_db(self):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+
+      cursor.execute("""
+            CREATE TABLE IF NOT EXISTS config_geral (
+                chave TEXT PRIMARY KEY,
+                valor TEXT
+            )
+            """)
+
+      cursor.execute("""
+            CREATE TABLE IF NOT EXISTS questoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cargo TEXT DEFAULT '',
+                materia TEXT NOT NULL DEFAULT '',
+                enunciado TEXT NOT NULL DEFAULT '',
+                opcao_a TEXT NOT NULL DEFAULT '',
+                opcao_b TEXT NOT NULL DEFAULT '',
+                opcao_c TEXT DEFAULT '',
+                opcao_d TEXT DEFAULT '',
+                opcao_e TEXT DEFAULT '',
+                gabarito TEXT NOT NULL DEFAULT '',
+                explicacao TEXT DEFAULT '',
+                total_tentativas INTEGER DEFAULT 0,
+                total_erros INTEGER DEFAULT 0,
+                erros_consecutivos INTEGER DEFAULT 0
+            )
+            """)
+
+      cursor.execute("PRAGMA table_info(questoes)")
+      columns = [col[1] for col in cursor.fetchall()]
+
+      if "cargo" not in columns:
+        cursor.execute("ALTER TABLE questoes ADD COLUMN cargo TEXT DEFAULT ''")
+
+      if "materia" not in columns:
+        cursor.execute(
+            "ALTER TABLE questoes ADD COLUMN materia TEXT DEFAULT ''"
+        )
+
+      cursor.execute("""
+            CREATE TABLE IF NOT EXISTS edital_config (
+                materia TEXT PRIMARY KEY,
+                qtd_questoes INTEGER DEFAULT 0,
+                peso REAL DEFAULT 1.0
+            )
+            """)
+
+      cursor.execute("""
+            CREATE TABLE IF NOT EXISTS historico_respostas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                questao_id INTEGER,
+                resposta_usuario TEXT,
+                acertou INTEGER,
+                data_resposta DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(questao_id) REFERENCES questoes(id)
+            )
+            """)
+      conn.commit()
+
+  def resolver_questao_com_ia(self, enunciado, opcoes_dict):
+    try:
+      client = genai.Client()
+      opcoes_formatadas = "\n".join(
+          [f"{k}) {v}" for k, v in opcoes_dict.items() if v and v.strip()]
+      )
+
+      prompt = f"""
+            Atue como um especialista em bancas de concursos públicos. 
+            Analise a questão abaixo, aponte qual é a alternativa correta (A, B, C, D ou E) e forneça uma explicação fundamentada.
+
+            Enunciado:
+            {enunciado}
+
+            Opções:
+            {opcoes_formatadas}
+
+            Responda obrigatoriamente no seguinte formato estrito:
+            RESPOSTA: [Letra]
+            EXPLICAÇÃO: [Sua explicação detalhada aqui]
+            """
+
+      response = client.models.generate_content(
+          model="gemini-2.5-flash",
+          contents=prompt,
+          config=types.GenerateContentConfig(temperature=0.1),
+      )
+      return response.text
+    except Exception as e:
+      return f"Erro ao consultar a IA: {str(e)}"
+
+  def gerar_questao_com_ia(self, tema, cargo="", materia=""):
+    try:
+      client = genai.Client()
+      prompt = f"""
+            Atue como um elaborador de bancas examinadoras de concursos públicos. 
+            Crie uma questão inédita de múltipla escolha (com 5 alternativas: A, B, C, D e E) sobre o seguinte tema:
+            Tema: {tema}
+            Cargo/Concurso Alvo: {cargo if cargo else 'Geral'}
+            Matéria: {materia if materia else 'Geral'}
+
+            Responda obrigatoriamente no seguinte formato estruturado:
+            ENUNCIADO: [Texto do enunciado da questão]
+            ALTERNATIVA_A: [Texto da opção A]
+            ALTERNATIVA_B: [Texto da opção B]
+            ALTERNATIVA_C: [Texto da opção C]
+            ALTERNATIVA_D: [Texto da opção D]
+            ALTERNATIVA_E: [Texto da opção E]
+            GABARITO: [Apenas a letra correta, ex: A]
+            EXPLICACAO: [Explicação fundamentada do gabarito e das alternativas]
+            """
+
+      response = client.models.generate_content(
+          model="gemini-2.5-flash",
+          contents=prompt,
+          config=types.GenerateContentConfig(temperature=0.3),
+      )
+      return response.text
+    except Exception as e:
+      return f"Erro ao gerar questão com IA: {str(e)}"
+
+  def ler_questao_por_imagem(self, image_path):
+    try:
+      client = genai.Client()
+      imagem = Image.open(image_path)
+
+      prompt = """
+            Analise a imagem anexada, que contém uma questão de concurso público ou prova.
+            Transcreva o texto da questão e organize-o obrigatoriamente no seguinte formato estruturado:
+            ENUNCIADO: [Texto completo do enunciado da questão]
+            ALTERNATIVA_A: [Texto da opção A]
+            ALTERNATIVA_B: [Texto da opção B]
+            ALTERNATIVA_C: [Texto da opção C]
+            ALTERNATIVA_D: [Texto da opção D]
+            ALTERNATIVA_E: [Texto da opção E]
+            GABARITO: [Apenas a letra correta se estiver indicada na imagem, ex: A, ou deixe vazio se não houver gabarito visível]
+            EXPLICACAO: [Explicação ou comentário se houver na imagem, ou deixe vazio]
+            """
+
+      response = client.models.generate_content(
+          model="gemini-2.5-flash",
+          contents=[prompt, imagem],
+          config=types.GenerateContentConfig(temperature=0.1),
+      )
+      return response.text
+    except Exception as e:
+      return f"Erro ao processar imagem com IA: {str(e)}"
+
+  def salvar_config_geral(self, chave, valor):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          """
+                INSERT INTO config_geral (chave, valor)
+                VALUES (?, ?)
+                ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
+            """,
+          (chave, valor),
+      )
+      conn.commit()
+
+  def remover_config_geral(self, chave):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute("DELETE FROM config_geral WHERE chave = ?", (chave,))
+      conn.commit()
+
+  def obter_config_geral(self, chave, default=""):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          "SELECT valor FROM config_geral WHERE chave = ?", (chave,)
+      )
+      res = cursor.fetchone()
+      return res[0] if res else default
+
+  def salvar_config_edital(self, materia, qtd_questoes, peso):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          """
+                INSERT INTO edital_config (materia, qtd_questoes, peso)
+                VALUES (?, ?, ?)
+                ON CONFLICT(materia) DO UPDATE SET
+                    qtd_questoes = excluded.qtd_questoes,
+                    peso = excluded.peso
+            """,
+          (materia.strip(), int(qtd_questoes), float(peso)),
+      )
+      conn.commit()
+
+  def remover_materia_edital(self, materia):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute("DELETE FROM edital_config WHERE materia = ?", (materia,))
+      conn.commit()
+
+  def obter_configs_edital(self):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          "SELECT materia, qtd_questoes, peso FROM edital_config ORDER BY materia"
+      )
+      return {
+          row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
+      }
+
+  def registrar_resposta(self, questao_id, resposta_usuario):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          """
+                SELECT gabarito, total_erros, erros_consecutivos, total_tentativas 
+                FROM questoes WHERE id = ?
+            """,
+          (questao_id,),
+      )
+      res = cursor.fetchone()
+      if not res:
+        return False, 0, 0
+
+      gabarito, total_erros, erros_cons, total_tent = res
+      total_erros = total_erros or 0
+      erros_cons = erros_cons or 0
+      total_tent = total_tent or 0
+
+      acertou = (
+          1
+          if resposta_usuario.strip().upper() == gabarito.strip().upper()
+          else 0
+      )
+      novo_total_tent = total_tent + 1
+
+      if acertou:
+        novo_erros_cons = 0
+        novo_total_erros = total_erros
+      else:
+        novo_erros_cons = erros_cons + 1
+        novo_total_erros = total_erros + 1
+
+      cursor.execute(
+          """
+                UPDATE questoes 
+                SET total_erros = ?, erros_consecutivos = ?, total_tentativas = ?
+                WHERE id = ?
+            """,
+          (novo_total_erros, novo_erros_cons, novo_total_tent, questao_id),
+      )
+
+      cursor.execute(
+          """
+                INSERT INTO historico_respostas (questao_id, resposta_usuario, acertou)
+                VALUES (?, ?, ?)
+            """,
+          (questao_id, resposta_usuario.upper(), acertou),
+      )
+
+      conn.commit()
+      return bool(acertou), novo_erros_cons, novo_total_erros
+
+  def obter_questoes(
+      self, cargo=None, materia=None, apenas_reincidentes=False
+  ):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      query = (
+          "SELECT id, cargo, materia, enunciado, opcao_a, opcao_b, opcao_c,"
+          " opcao_d, opcao_e, gabarito, explicacao, total_tentativas,"
+          " total_erros, erros_consecutivos FROM questoes WHERE 1=1"
+      )
+      params = []
+
+      if (
+          cargo
+          and cargo != "Todos"
+          and cargo != "Cargo / Concurso"
+          and cargo != "Nenhum cargo cadastrado"
+      ):
+        query += " AND cargo = ?"
+        params.append(cargo)
+
+      if materia and materia != "Todas":
+        query += " AND materia = ?"
+        params.append(materia)
+
+      if apenas_reincidentes:
+        query += " AND erros_consecutivos >= 2"
+
+      query += " ORDER BY RANDOM()"
+      cursor.execute(query, params)
+      return cursor.fetchall()
+
+  def obter_cargos(self):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          "SELECT DISTINCT cargo FROM questoes WHERE cargo IS NOT NULL AND"
+          " cargo != '' ORDER BY cargo"
+      )
+      return [row[0] for row in cursor.fetchall()]
+
+  def obter_cargos_totais(self):
+    cargos_set = set()
+    nome_conc = self.obter_config_geral("nome_concurso", "")
+    if nome_conc and nome_conc != "Não definido" and nome_conc.strip() != "":
+      cargos_set.add(nome_conc)
+
+    for c in self.obter_cargos():
+      if c:
+        cargos_set.add(c)
+
+    return sorted(list(cargos_set))
+
+  def obter_materias(self, cargo=None):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      if cargo and cargo != "Todos" and cargo != "Cargo / Concurso":
+        cursor.execute(
+            "SELECT DISTINCT materia FROM questoes WHERE cargo = ? AND materia"
+            " IS NOT NULL AND materia != '' ORDER BY materia",
+            (cargo,),
+        )
+        materias_banco = [row[0] for row in cursor.fetchall()]
+      else:
+        cursor.execute(
+            "SELECT DISTINCT materia FROM questoes WHERE materia IS NOT NULL"
+            " AND materia != '' ORDER BY materia"
+        )
+        materias_banco = [row[0] for row in cursor.fetchall()]
+
+      cursor.execute("SELECT materia FROM edital_config")
+      materias_edital = [row[0] for row in cursor.fetchall()]
+
+      return sorted(list(set(materias_banco + materias_edital)))
+
+  def adicionar_questao(
+      self,
+      cargo,
+      materia,
+      enunciado,
+      op_a,
+      op_b,
+      op_c,
+      op_d,
+      op_e,
+      gabarito,
+      explicacao,
+  ):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          """
+                INSERT INTO questoes (cargo, materia, enunciado, opcao_a, opcao_b, opcao_c, opcao_d, opcao_e, gabarito, explicacao)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+          (
+              cargo.strip(),
+              materia.strip(),
+              enunciado,
+              op_a,
+              op_b,
+              op_c,
+              op_d,
+              op_e,
+              gabarito.upper(),
+              explicacao,
+          ),
+      )
+      conn.commit()
+
+  def deletar_questao(self, questao_id):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      cursor.execute(
+          "DELETE FROM historico_respostas WHERE questao_id = ?", (questao_id,)
+      )
+      cursor.execute("DELETE FROM questoes WHERE id = ?", (questao_id,))
+      conn.commit()
+
+  def obter_analise_dashboard(self):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      configs = self.obter_configs_edital()
+      materias = self.obter_materias()
+
+      detalhes_materias = []
+      materia_mais_critica = "Nenhuma"
+      max_pontos_perdidos = -1.0
+
+      pontuacao_maxima_prova = 0.0
+      pontuacao_projetada = 0.0
+      total_erros_geral = 0
+      total_tentativas_geral = 0
+
+      for mat in materias:
+        cfg = configs.get(mat, {"qtd": 0, "peso": 1.0})
+        qtd_prova = cfg["qtd"]
+        peso = cfg["peso"]
+
+        cursor.execute(
+            """
+                    SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
+                    FROM questoes WHERE materia = ?
+                """,
+            (mat,),
+        )
+        q_cad, tent, erros = cursor.fetchone()
+
+        q_cad = q_cad or 0
+        tent = tent or 0
+        erros = erros or 0
+        acertos = tent - erros
+
+        total_erros_geral += erros
+        total_tentativas_geral += tent
+
+        pontos_possiveis_mat = qtd_prova * peso
+        pontuacao_maxima_prova += pontos_possiveis_mat
+
+        if tent > 0:
+          taxa_acerto = (acertos / tent) * 100.0
+          pontos_estimados_mat = pontos_possiveis_mat * (taxa_acerto / 100.0)
+          pontos_perdidos_mat = pontos_possiveis_mat - pontos_estimados_mat
+        else:
+          taxa_acerto = 0.0
+          pontos_estimados_mat = 0.0
+          pontos_perdidos_mat = 0.0
+
+        pontuacao_projetada += pontos_estimados_mat
+
+        if (
+            tent > 0
+            and pontos_perdidos_mat > max_pontos_perdidos
+            and taxa_acerto < 100.0
+        ):
+          max_pontos_perdidos = pontos_perdidos_mat
+          materia_mais_critica = mat
+
+        detalhes_materias.append({
+            "materia": mat,
+            "qtd_prova": qtd_prova,
+            "peso": peso,
+            "q_cadastradas": q_cad,
+            "tentativas": tent,
+            "erros": erros,
+            "taxa_acerto": taxa_acerto,
+            "pontos_possiveis": pontos_possiveis_mat,
+            "pontos_estimados": pontos_estimados_mat,
+            "pontos_perdidos": pontos_perdidos_mat,
+        })
+
+      nome_concurso = self.obter_config_geral("nome_concurso", "Não definido")
+
+      return {
+          "nome_concurso": nome_concurso,
+          "materias_detalhes": detalhes_materias,
+          "materia_mais_critica": (
+              materia_mais_critica if max_pontos_perdidos > 0 else "Nenhuma"
+          ),
+          "pontuacao_projetada": pontuacao_projetada,
+          "pontuacao_maxima": pontuacao_maxima_prova,
+          "total_erros_geral": total_erros_geral,
+          "total_tentativas_geral": total_tentativas_geral,
+          "taxa_global": (
+              (total_tentativas_geral - total_erros_geral)
+              / total_tentativas_geral
+              * 100.0
+          )
+          if total_tentativas_geral > 0
+          else 0.0,
+      }
+
+
+@st.cache_resource
+def get_db():
+  return DatabaseManager()
+
+
+db = get_db()
+
+# Inicialização do Session State para o fluxo de estudo
+if "questoes_lista" not in st.session_state:
+  st.session_state.questoes_lista = []
+if "indice_atual" not in st.session_state:
+  st.session_state.indice_atual = 0
+if "resposta_enviada" not in st.session_state:
+  st.session_state.resposta_enviada = False
+if "resultado_atual" not in st.session_state:
+  st.session_state.resultado_atual = None
+
+# ==============================================================================
+# FRONTEND: STREAMLIT APP UI
+# ==============================================================================
+st.sidebar.title("⚡ STUDYQUEST")
+menu = st.sidebar.radio(
+    "Navegação", ["📊 Dashboard", "📖 Questões", "➕ Cadastrar", "💾 Backup"]
+)
+
+if menu == "📊 Dashboard":
+  st.title("📊 Dashboard & Análise Estratégica")
+
+  dados = db.obter_analise_dashboard()
+
+  col1, col2, col3 = st.columns(3)
+  with col1:
+    st.metric(
+        "PONTUAÇÃO PROJETADA",
+        f"{dados['pontuacao_projetada']:.1f} / {dados['pontuacao_maxima']:.1f}",
+    )
+  with col2:
+    st.metric("⚠️ PONTO CEGO", dados["materia_mais_critica"])
+  with col3:
+    st.metric("APROVEITAMENTO GERAL", f"{dados['taxa_global']:.1f}%")
+
+  st.markdown("---")
+  st.subheader("⚙️ Configurar Concurso e Edital")
+
+  with st.form("form_concurso"):
+    concurso_atual = dados.get("nome_concurso", "")
+    ent_edital_concurso = st.text_input(
+        "Nome do Concurso / Cargo",
+        value=concurso_atual if concurso_atual != "Não definido" else "",
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+      btn_salvar_concurso = st.form_submit_button("Salvar Concurso")
+    with c2:
+      btn_remover_concurso = st.form_submit_button("Remover Concurso")
+
+    if btn_salvar_concurso:
+      if ent_edital_concurso.strip():
+        db.salvar_config_geral("nome_concurso", ent_edital_concurso.strip())
+        st.success(f"Concurso definido como: '{ent_edital_concurso.strip()}'")
+        st.rerun()
+      else:
+        st.warning("Digite o nome do concurso/cargo!")
+
+    if btn_remover_concurso:
+      db.remover_config_geral("nome_concurso")
+      st.success("Nome do concurso removido!")
+      st.rerun()
+
+  with st.form("form_edital"):
+    st.markdown("Adicionar / Atualizar Matéria do Edital")
+    f1, f2, f3 = st.columns([3, 1, 1])
+    with f1:
+      mat_input = st.text_input("Matéria (ex: Português)")
+    with f2:
+      qtd_input = st.text_input("Qtd Prova", value="10")
+    with f3:
+      peso_input = st.text_input("Peso", value="1.0")
+
+    btn_salvar_edital = st.form_submit_button("+ Adicionar Matéria")
+    if btn_salvar_edital:
+      if mat_input.strip() and qtd_input.strip() and peso_input.strip():
+        try:
+          db.salvar_config_edital(
+              mat_input.strip(), int(qtd_input), float(peso_input)
+          )
+          st.success(f"Matéria '{mat_input.strip()}' salva no Edital!")
+          st.rerun()
+        except ValueError:
+          st.error("Quantidade deve ser inteiro e Peso deve ser decimal.")
+      else:
+        st.warning("Preencha todos os campos da matéria!")
+
+  st.markdown("---")
+  concurso_nome_titulo = dados.get("nome_concurso", "")
+  titulo_analise = (
+      f"📋 Análise Estratégica por Matéria — {concurso_nome_titulo}"
+      if concurso_nome_titulo and concurso_nome_titulo != "Não definido"
+      else "📋 Análise Estratégica por Matéria"
+  )
+  st.subheader(titulo_analise)
+
+  for item in dados["materias_detalhes"]:
+    with st.container():
+      cols = st.columns([3, 2, 1])
+      with cols[0]:
+        st.markdown(f"**{item['materia']}**")
+        st.caption(
+            f"Edital: {item['qtd_prova']} q. (Peso {item['peso']:.1f}) | No"
+            f" banco: {item['tentativas']} resolvidas"
+        )
+      with cols[1]:
+        txt_perda = (
+            f"Perda: -{item['pontos_perdidos']:.1f} pts"
+            if item["tentativas"] > 0
+            else "Sem dados praticados"
+        )
+        st.markdown(f"Acerto: **{item['taxa_acerto']:.1f}%**")
+        st.caption(txt_perda)
+      with cols[2]:
+        if st.button("🗑️", key=f"del_mat_{item['materia']}"):
+          db.deletar_materia_edital(item["materia"])
+          st.rerun()
+      st.markdown("---")
+
+elif menu == "📖 Questões":
+  st.title("📖 Resolução de Questões")
+
+  cargos = ["Todos"] + db.obter_cargos_totais()
+  f_col1, f_col2, f_col3, f_col4 = st.columns([2, 2, 2, 2])
+  with f_col1:
+    cargo_filtro = st.selectbox("Cargo", cargos)
+  with f_col2:
+    mats = ["Todas"] + db.obter_materias(
+        cargo=cargo_filtro if cargo_filtro != "Todos" else None
+    )
+    materia_filtro = st.selectbox("Matéria", mats)
+  with f_col3:
+    apenas_reincidentes = st.checkbox("⚠️ Erros 2x+")
+  with f_col4:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔍 Carregar Questões", use_container_width=True):
+      st.session_state.questoes_lista = db.obter_questoes(
+          cargo_filtro, materia_filtro, apenas_reincidentes
+      )
+      st.session_state.indice_atual = 0
+      st.session_state.resposta_enviada = False
+      st.session_state.resultado_atual = None
+      st.rerun()
+
+  if st.session_state.questoes_lista:
+    idx = st.session_state.indice_atual
+    if idx < len(st.session_state.questoes_lista):
+      q = st.session_state.questoes_lista[idx]
+      (
+          q_id,
+          cargo_q,
+          materia_q,
+          enunciado,
+          op_a,
+          op_b,
+          op_c,
+          op_d,
+          op_e,
+          gabarito,
+          explicacao,
+          total_tentativas,
+          total_erros,
+          erros_cons,
+      ) = q
+
+      st.markdown(
+          f"**Cargo:** {cargo_q or 'Geral'} | **Matéria:** {materia_q} |"
+          f" **Questão {idx + 1} de {len(st.session_state.questoes_lista)}** |"
+          f" **Erros:** {total_erros or 0}"
+      )
+
+      if erros_cons >= 3:
+        st.error(
+            f"🚨 ALERTA CRÍTICO: Você errou esta questão {erros_cons}x seguidas!"
+        )
+      elif erros_cons == 2:
+        st.warning("⚠️ ERRO RECORRENTE: Você errou esta questão nas últimas 2x!")
+
+      st.markdown("### Enunciado")
+      st.info(enunciado)
+
+      opcoes_dict = {"A": op_a, "B": op_b, "C": op_c, "D": op_d, "E": op_e}
+      opcoes_validas = {k: v for k, v in opcoes_dict.items() if v and v.strip()}
+
+      opcao_escolhida = st.radio(
+          "Escolha a alternativa:",
+          options=list(opcoes_validas.keys()),
+          format_func=lambda x: f"{x}) {opcoes_validas[x]}",
+          key=f"radio_resp_{q_id}",
+      )
+
+      col_acao1, col_acao2, col_acao3 = st.columns([2, 2, 2])
+      with col_acao1:
+        if st.button("✅ Confirmar Resposta"):
+          acertou, novo_erros_cons, total_erros_reg = db.registrar_resposta(
+              q_id, opcao_escolhida
+          )
+          st.session_state.resposta_enviada = True
+          st.session_state.resultado_atual = {
+              "acertou": acertou,
+              "gabarito": gabarito,
+              "explicacao": explicacao,
+          }
+          st.rerun()
+
+      with col_acao2:
+        if st.button("🤖 Resolver com IA"):
+          resposta_ia = db.resolver_questao_com_ia(enunciado, opcoes_validas)
+          st.session_state.resposta_enviada = True
+          st.session_state.resultado_atual = {
+              "acertou": None,
+              "gabarito": gabarito,
+              "explicacao": resposta_ia,
+          }
+          st.rerun()
+
+      with col_acao3:
+        if st.button("🗑️ Excluir Questão"):
+          db.deletar_questao(q_id)
+          st.success("Questão excluída!")
+          st.session_state.questoes_lista.pop(idx)
+          if (
+              st.session_state.indice_atual
+              >= len(st.session_state.questoes_lista)
+              and st.session_state.indice_atual > 0
+          ):
+            st.session_state.indice_atual -= 1
+          st.session_state.resposta_enviada = False
+          st.rerun()
+
+      if (
+          st.session_state.resposta_enviada
+          and st.session_state.resultado_atual
+      ):
+        res = st.session_state.resultado_atual
+        if res["acertou"] is True:
+          st.success("🎉 RESPOSTA CORRETA!")
+          st.write(
+              res["explicacao"]
+              if res["explicacao"]
+              else "Sem explicação cadastrada."
+          )
+        elif res["acertou"] is False:
+          st.error(f"❌ INCORRETA! Gabarito Oficial: ({res['gabarito']})")
+          st.write(
+              res["explicacao"]
+              if res["explicacao"]
+              else "Sem explicação cadastrada."
+          )
+        else:
+          st.info("🤖 Resposta da IA:")
+          st.write(res["explicacao"])
+
+        if st.button("Próxima Questão ➡️"):
+          st.session_state.indice_atual += 1
+          st.session_state.resposta_enviada = False
+          st.session_state.resultado_atual = None
+          st.rerun()
+    else:
+      st.info("Você concluiu todas as questões carregadas neste caderno!")
+  else:
+    st.info("Utilize os filtros acima e clique em 'Carregar Questões' para iniciar.")
+
+elif menu == "➕ Cadastrar":
+  st.title("➕ Nova Questão & Leitura Inteligente")
+
+  with st.expander("🖼️ Leitura por Imagem (Print/Foto da Questão)"):
+    imagem_file = st.file_uploader(
+        "Selecione um arquivo de imagem", type=["png", "jpg", "jpeg", "webp"]
+    )
+    if imagem_file is not None:
+      if st.button("Processar Imagem com IA"):
+        with open("temp_img.png", "wb") as f:
+          f.write(imagem_file.getbuffer())
+        resposta_ia = db.ler_questao_por_imagem("temp_img.png")
+        st.session_state.ia_lida = resposta_ia
+        st.success("Imagem lida pela IA! Verifique os dados transcritos.")
+
+  with st.expander("✨ Gerar Questão por Tema (IA)"):
+    tema_ia = st.text_input(
+        "Digite o tema da questão (ex: Licitações - Lei 14.133/2021)"
+    )
+    if st.button("Gerar Questão com IA"):
+      if tema_ia.strip():
+        cargo_gen = st.session_state.get("cad_cargo", "")
+        materia_gen = st.session_state.get("cad_materia", "")
+        resposta_gen = db.gerar_questao_com_ia(tema_ia, cargo_gen, materia_gen)
+        st.session_state.ia_lida = resposta_gen
+        st.success("Questão gerada pela IA!")
+      else:
+        st.warning("Digite o tema!")
+
+  cargos_iniciais = db.obter_cargos_totais()
+  if not cargos_iniciais:
+    cargos_iniciais = ["Cargo / Concurso"]
+
+  with st.form("form_cadastrar_questao"):
+    cad_cargo = st.selectbox("Cargo / Concurso", cargos_iniciais, key="cad_cargo")
+    cad_materia = st.text_input("Matéria (ex: Português)", key="cad_materia")
+    cad_enunciado = st.text_area("Enunciado da Questão")
+
+    c_op1, c_op2 = st.columns(2)
+    with c_op1:
+      op_a = st.text_input("Opção A")
+      op_b = st.text_input("Opção B")
+      op_c = st.text_input("Opção C")
+    with c_op2:
+      op_d = st.text_input("Opção D")
+      op_e = st.text_input("Opção E")
+
+    cad_gabarito = st.selectbox("Gabarito", ["A", "B", "C", "D", "E"])
+    cad_explicacao = st.text_area("Explicação / Comentário")
+
+    if st.form_submit_button("💾 Cadastrar Questão"):
+      if (
+          cad_materia.strip()
+          and cad_enunciado.strip()
+          and op_a.strip()
+          and op_b.strip()
+      ):
+        db.adicionar_questao(
+            cad_cargo,
+            cad_materia,
+            cad_enunciado,
+            op_a,
+            op_b,
+            op_c,
+            op_d,
+            op_e,
+            cad_gabarito,
+            cad_explicacao,
+        )
+        st.success("Questão cadastrada com sucesso!")
+      else:
+        st.warning("Preencha a Matéria, Enunciado e as Opções A e B!")
+
+elif menu == "💾 Backup":
+  st.title("💾 Gestão do Banco de Dados")
+  st.write(
+      "Exporte seus dados com segurança para não perder seu histórico de erros e"
+      " edital."
+  )
+
+  if os.path.exists(DB_NAME):
+    with open(DB_NAME, "rb") as f:
+      st.download_button(
+          label="💾 Criar e Baixar Backup (.db)",
+          data=f,
+          file_name=(
+              "backup_questoes_"
+              f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+          ),
+          mime="application/octet-stream",
+      )
+
+  st.markdown("---")
+  st.subheader("Restaurar Backup")
+  uploaded_backup = st.file_uploader(
+      "Selecione um arquivo de banco de dados (.db) para restaurar", type=["db"]
+  )
+  if uploaded_backup is not None:
+    if st.button("Substituir Dados Atuais pelo Backup"):
+      with open(DB_NAME, "wb") as f:
+        f.write(uploaded_backup.getbuffer())
+      st.success("Banco de dados restaurado com sucesso! Atualize a página.")
