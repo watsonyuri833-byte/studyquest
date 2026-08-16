@@ -20,24 +20,18 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* Aumenta o espaçamento vertical entre os itens do menu (radio) */
         div.stRadio > div[role="radiogroup"] {
             gap: 14px !important;
         }
-        
-        /* Torna as bolinhas do radio bem visíveis com borda clara e fundo adequado */
         div.stRadio [data-baseweb="radio"] div:first-child {
             background-color: #1e1e1e !important;
-            border: 2px solid #00D26A !important; /* Borda destacada */
+            border: 2px solid #00D26A !important;
         }
-        
-        /* Adiciona um espaçamento interno e efeito hover elegante nas opções */
         div.stRadio label {
             padding: 6px 10px !important;
             border-radius: 8px;
             transition: background 0.2s ease;
         }
-        
         div.stRadio label:hover {
             background-color: rgba(255, 255, 255, 0.07) !important;
         }
@@ -60,14 +54,9 @@ class DatabaseManager:
 
   def __init__(self):
     self.conn_str = st.secrets["supabase"]["connection_string"]
-    self.init_db()
 
   def get_connection(self):
     return psycopg2.connect(self.conn_str)
-
-  def init_db(self):
-    # As tabelas principais já são criadas no Supabase, mas mantemos o método
-    pass
 
   def resolver_questao_com_ia(self, enunciado, opcoes_dict):
     try:
@@ -75,7 +64,6 @@ class DatabaseManager:
       opcoes_formatadas = "\n".join(
           [f"{k}) {v}" for k, v in opcoes_dict.items() if v and v.strip()]
       )
-
       prompt = f"""
             Atue como um especialista em bancas de concursos públicos. 
             Analise a questão abaixo, aponte qual é a alternativa correta (A, B, C, D ou E) e forneça uma explicação fundamentada.
@@ -90,7 +78,6 @@ class DatabaseManager:
             RESPOSTA: [Letra]
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
-
       response = client.models.generate_content(
           model="gemini-2.0-flash",
           contents=prompt,
@@ -105,20 +92,19 @@ class DatabaseManager:
       client = genai.Client()
       prompt = f"""
             Atue como um especialista em processamento de dados para concursos públicos. 
-            Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado (com as tags exatas):
+            Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado:
             ENUNCIADO: [Texto limpo do enunciado da questão]
             ALTERNATIVA_A: [Texto da opção A sem a letra inicial]
             ALTERNATIVA_B: [Texto da opção B sem a letra inicial]
             ALTERNATIVA_C: [Texto da opção C sem a letra inicial, ou deixe vazio se não houver]
             ALTERNATIVA_D: [Texto da opção D sem a letra inicial, ou deixe vazio se não houver]
             ALTERNATIVA_E: [Texto da opção E sem a letra inicial, ou deixe vazio se não houver]
-            GABARITO: [Apenas a letra correta se indicada, ex: A, B, C, D ou E, ou A como padrão se não houver]
+            GABARITO: [Apenas a letra correta se indicada, ex: A, B, C, D ou E]
             EXPLICACAO: [Explicação ou comentário se houver no texto, ou deixe vazio]
 
             Texto Bruto da Questão:
             {texto_bruto}
             """
-
       response = client.models.generate_content(
           model="gemini-2.0-flash",
           contents=prompt,
@@ -132,20 +118,18 @@ class DatabaseManager:
     try:
       client = genai.Client()
       imagem = Image.open(image_path)
-
       prompt = """
-            Analise a imagem anexada, que contém uma questão de concurso público ou prova.
-            Transcreva o texto da questão e organize-o obrigatoriamente no seguinte formato estruturado:
-            ENUNCIADO: [Texto completo do enunciado da questão]
-            ALTERNATIVA_A: [Texto da opção A]
-            ALTERNATIVA_B: [Texto da opção B]
-            ALTERNATIVA_C: [Texto da opção C]
-            ALTERNATIVA_D: [Texto da opção D]
-            ALTERNATIVA_E: [Texto da opção E]
-            GABARITO: [Apenas a letra correta se estiver indicada na imagem, ex: A]
-            EXPLICACAO: [Explicação ou comentário se houver na imagem]
+            Analise a imagem anexada, contendo uma questão de concurso.
+            Transcreva e organize obrigatoriamente no formato:
+            ENUNCIADO: [...]
+            ALTERNATIVA_A: [...]
+            ALTERNATIVA_B: [...]
+            ALTERNATIVA_C: [...]
+            ALTERNATIVA_D: [...]
+            ALTERNATIVA_E: [...]
+            GABARITO: [...]
+            EXPLICACAO: [...]
             """
-
       response = client.models.generate_content(
           model="gemini-2.0-flash",
           contents=[prompt, imagem],
@@ -181,45 +165,61 @@ class DatabaseManager:
         res = cursor.fetchone()
         return res[0] if res else default
 
-  def salvar_config_edital(self, materia, qtd_questoes, peso):
+  def salvar_config_edital(self, concurso_nome, materia, qtd_questoes, peso):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
             """
-                INSERT INTO edital_config (materia, qtd_questoes, peso)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (materia) DO UPDATE SET
+                INSERT INTO edital_config (concurso_nome, materia, qtd_questoes, peso)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (concurso_nome, materia) DO UPDATE SET
                     qtd_questoes = EXCLUDED.qtd_questoes,
                     peso = EXCLUDED.peso
             """,
-            (materia.strip(), int(qtd_questoes), float(peso)),
+            (concurso_nome.strip(), materia.strip(), int(qtd_questoes), float(peso)),
         )
         conn.commit()
 
-  def remover_materia_edital(self, materia):
+  def remover_materia_edital(self, concurso_nome, materia):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        cursor.execute("DELETE FROM edital_config WHERE materia = %s", (materia,))
+        cursor.execute(
+            "DELETE FROM edital_config WHERE concurso_nome = %s AND materia = %s",
+            (concurso_nome, materia),
+        )
         conn.commit()
 
-  def obter_configs_edital(self, cargo=None):
+  def deletar_concurso_inteiro(self, concurso_nome):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        try:
-          if cargo and cargo != "Não definido" and cargo.strip() != "":
-            cursor.execute(
-                "SELECT materia, qtd_questoes, peso FROM edital_config WHERE"
-                " cargo = %s",
-                (cargo.strip(),),
-            )
-          else:
-            cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config")
-        except Exception:
-          conn.rollback()
+        cursor.execute(
+            "DELETE FROM edital_config WHERE concurso_nome = %s", (concurso_nome,)
+        )
+        conn.commit()
+
+  def obter_configs_edital(self, concurso_nome=None):
+    with self.get_connection() as conn:
+      with conn.cursor() as cursor:
+        if concurso_nome and concurso_nome != "Todos" and concurso_nome.strip():
+          cursor.execute(
+              "SELECT materia, qtd_questoes, peso FROM edital_config WHERE concurso_nome = %s",
+              (concurso_nome.strip(),),
+          )
+        else:
           cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config")
         return {
             row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
         }
+
+  def obter_concursos_cadastrados(self):
+    with self.get_connection() as conn:
+      with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT DISTINCT concurso_nome FROM edital_config UNION SELECT"
+            " DISTINCT cargo FROM questoes WHERE cargo IS NOT NULL AND cargo !=''"
+        )
+        res = [row[0] for row in cursor.fetchall() if row[0]]
+        return sorted(res)
 
   def registrar_resposta(self, questao_id, resposta_usuario):
     with self.get_connection() as conn:
@@ -262,7 +262,6 @@ class DatabaseManager:
             """,
             (novo_total_erros, novo_erros_cons, novo_total_tent, questao_id),
         )
-
         cursor.execute(
             """
                 INSERT INTO historico_respostas (questao_id, resposta_usuario, acertou)
@@ -270,7 +269,6 @@ class DatabaseManager:
             """,
             (questao_id, resposta_usuario.upper(), acertou),
         )
-
         conn.commit()
         return bool(acertou), novo_erros_cons, novo_total_erros
 
@@ -285,7 +283,6 @@ class DatabaseManager:
             " total_erros, erros_consecutivos FROM questoes WHERE 1=1"
         )
         params = []
-
         if (
             cargo
             and cargo != "Todos"
@@ -294,14 +291,11 @@ class DatabaseManager:
         ):
           query += " AND cargo = %s"
           params.append(cargo)
-
         if materia and materia != "Todas":
           query += " AND materia = %s"
           params.append(materia)
-
         if apenas_reincidentes:
           query += " AND erros_consecutivos >= 2"
-
         query += " ORDER BY RANDOM()"
         cursor.execute(query, params)
         return cursor.fetchall()
@@ -316,15 +310,10 @@ class DatabaseManager:
         return [row[0] for row in cursor.fetchall()]
 
   def obter_cargos_totais(self):
-    cargos_set = set()
-    nome_conc = self.obter_config_geral("nome_concurso", "")
-    if nome_conc and nome_conc != "Não definido" and nome_conc.strip() != "":
-      cargos_set.add(nome_conc)
-
+    cargos_set = set(self.obter_concursos_cadastrados())
     for c in self.obter_cargos():
       if c:
         cargos_set.add(c)
-
     return sorted(list(cargos_set))
 
   def obter_materias(self, cargo=None):
@@ -344,9 +333,8 @@ class DatabaseManager:
           )
           materias_banco = [row[0] for row in cursor.fetchall()]
 
-        cursor.execute("SELECT materia FROM edital_config")
-        materias_edital = [row[0] for row in cursor.fetchall()]
-
+        configs = self.obter_configs_edital(cargo)
+        materias_edital = list(configs.keys())
         return sorted(list(set(materias_banco + materias_edital)))
 
   def adicionar_questao(
@@ -394,28 +382,44 @@ class DatabaseManager:
         cursor.execute("DELETE FROM questoes WHERE id = %s", (questao_id,))
         conn.commit()
 
-  def deletar_materia_edital(self, materia):
-    self.remover_materia_edital(materia)
-
-  def obter_analise_dashboard(self):
+  def obter_analise_dashboard(self, concurso_ativo=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        configs = self.obter_configs_edital()
-        materias = self.obter_materias()
+        configs = self.obter_configs_edital(concurso_ativo)
+        materias_edital = list(configs.keys())
+
+        if concurso_ativo and concurso_ativo != "Todos":
+          cursor.execute(
+              "SELECT DISTINCT materia FROM questoes WHERE cargo = %s AND"
+              " materia IS NOT NULL",
+              (concurso_ativo,),
+          )
+        else:
+          cursor.execute(
+              "SELECT DISTINCT materia FROM questoes WHERE materia IS NOT NULL"
+          )
+        materias_questoes = [row[0] for row in cursor.fetchall()]
+        materias = sorted(list(set(materias_edital + materias_questoes)))
 
         detalhes_materias = []
         materia_mais_critica = "Nenhuma"
         max_pontos_perdidos = -1.0
-
         pontuacao_maxima_prova = 0.0
         pontuacao_projetada = 0.0
         total_erros_geral = 0
         total_tentativas_geral = 0
 
-        cursor.execute(
-            "SELECT COUNT(id) FROM questoes WHERE explicacao IS NOT NULL AND"
-            " TRIM(explicacao) != ''"
-        )
+        if concurso_ativo and concurso_ativo != "Todos":
+          cursor.execute(
+              "SELECT COUNT(id) FROM questoes WHERE cargo = %s AND explicacao IS"
+              " NOT NULL AND TRIM(explicacao) != ''",
+              (concurso_ativo,),
+          )
+        else:
+          cursor.execute(
+              "SELECT COUNT(id) FROM questoes WHERE explicacao IS NOT NULL AND"
+              " TRIM(explicacao) != ''"
+          )
         total_comentadas = cursor.fetchone()[0] or 0
 
         for mat in materias:
@@ -423,15 +427,24 @@ class DatabaseManager:
           qtd_prova = cfg["qtd"]
           peso = cfg["peso"]
 
-          cursor.execute(
-              """
-                      SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
-                      FROM questoes WHERE materia = %s
-                  """,
-              (mat,),
-          )
-          q_cad, tent, erros = cursor.fetchone()
+          if concurso_ativo and concurso_ativo != "Todos":
+            cursor.execute(
+                """
+                        SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
+                        FROM questoes WHERE cargo = %s AND materia = %s
+                    """,
+                (concurso_ativo, mat),
+            )
+          else:
+            cursor.execute(
+                """
+                        SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
+                        FROM questoes WHERE materia = %s
+                    """,
+                (mat,),
+            )
 
+          q_cad, tent, erros = cursor.fetchone()
           q_cad = q_cad or 0
           tent = tent or 0
           erros = erros or 0
@@ -476,7 +489,6 @@ class DatabaseManager:
               "pontos_perdidos": pontos_perdidos_mat,
           })
 
-        nome_concurso = self.obter_config_geral("nome_concurso", "Não definido")
         certas_geral = total_tentativas_geral - total_erros_geral
         taxa_global = (
             (certas_geral / total_tentativas_geral * 100.0)
@@ -485,7 +497,7 @@ class DatabaseManager:
         )
 
         return {
-            "nome_concurso": nome_concurso,
+            "nome_concurso": concurso_ativo,
             "materias_detalhes": detalhes_materias,
             "materia_mais_critica": (
                 materia_mais_critica if max_pontos_perdidos > 0 else "Nenhuma"
@@ -508,10 +520,10 @@ def get_db():
 db = get_db()
 
 
-# --- FUNÇÕES CACHEADAS (ESCOPO GLOBAL) ---
+# --- FUNÇÕES CACHEADAS ---
 @st.cache_data(ttl=60)
-def cached_obter_analise_dashboard():
-  return db.obter_analise_dashboard()
+def cached_obter_analise_dashboard(concurso_ativo):
+  return db.obter_analise_dashboard(concurso_ativo)
 
 
 @st.cache_data(ttl=60)
@@ -538,6 +550,8 @@ if "resposta_enviada" not in st.session_state:
   st.session_state.resposta_enviada = False
 if "resultado_atual" not in st.session_state:
   st.session_state.resultado_atual = None
+if "concurso_selecionado" not in st.session_state:
+  st.session_state.concurso_selecionado = "Geral"
 
 if "form_enunciado" not in st.session_state:
   st.session_state.form_enunciado = ""
@@ -565,22 +579,62 @@ menu = st.sidebar.radio(
 )
 
 if menu == "📊 Dashboard":
-  col_title, col_filter = st.columns([3, 1])
-  with col_title:
-    st.title("📊 Dashboard & Análise Estratégica")
-  with col_filter:
-    periodo_selecionado = st.selectbox(
-        "Período",
-        [
-            "Últimos 7 dias",
-            "Últimos 15 dias",
-            "Últimos 30 dias",
-            "Todo o período",
-        ],
-        key="cb_periodo",
-    )
+  st.title("📊 Dashboard & Análise Estratégica")
 
-  dados = cached_obter_analise_dashboard()
+  # --- GERENCIADOR DE MÚLTIPLOS CONCURSOS ---
+  cargos_cadastrados = db.obter_concursos_cadastrados()
+  opcoes_concurso = ["Geral (Todos)"] + cargos_cadastrados
+
+  with st.container(border=True):
+    st.subheader("🎯 Seleção e Gestão de Concursos")
+    col_sel, col_novo, col_del = st.columns([3, 3, 2])
+
+    with col_sel:
+      # Sincronizar índice atual
+      current_idx = 0
+      if st.session_state.concurso_selecionado in opcoes_concurso:
+        current_idx = opcoes_concurso.index(
+            st.session_state.concurso_selecionado
+        )
+
+      concurso_escolhido = st.selectbox(
+          "Concurso Ativo", opcoes_concurso, index=current_idx
+      )
+      if concurso_escolhido != st.session_state.concurso_selecionado:
+        st.session_state.concurso_selecionado = concurso_escolhido
+        st.rerun()
+
+    with col_novo:
+      novo_concurso_input = st.text_input("Criar Novo Concurso")
+      if st.button("➕ Adicionar Concurso"):
+        if novo_concurso_input.strip():
+          # Adiciona uma matéria padrão ou apenas salva no state/edital para criá-lo
+          db.salvar_config_edital(
+              novo_concurso_input.strip(), "Geral", 10, 1.0
+          )
+          st.session_state.concurso_selecionado = novo_concurso_input.strip()
+          st.success(f"Concurso '{novo_concurso_input.strip()}' criado!")
+          st.rerun()
+        else:
+          st.warning("Digite o nome do concurso!")
+
+    with col_del:
+      st.markdown("<br>", unsafe_allow_html=True)
+      if (
+          st.session_state.concurso_selecionado != "Geral (Todos)"
+          and st.button("🗑️ Excluir Concurso Ativo", use_container_width=True)
+      ):
+        db.deletar_concurso_inteiro(st.session_state.concurso_selecionado)
+        st.success("Concurso excluído!")
+        st.session_state.concurso_selecionado = "Geral (Todos)"
+        st.rerun()
+
+  ativo_param = (
+      None
+      if st.session_state.concurso_selecionado == "Geral (Todos)"
+      else st.session_state.concurso_selecionado
+  )
+  dados = cached_obter_analise_dashboard(ativo_param)
 
   total = dados.get("total", 0)
   certas = dados.get("certas", 0)
@@ -623,63 +677,51 @@ if menu == "📊 Dashboard":
 
   st.markdown("---")
 
+  # --- FORMULÁRIO DE ADICIONAR MATÉRIAS AO CONCURSO ATIVO ---
   with st.container(border=True):
-    st.subheader("⚙️ Configurar Concurso e Edital")
-    with st.form("form_concurso"):
-      concurso_atual = dados.get("nome_concurso", "")
-      ent_edital_concurso = st.text_input(
-          "Nome do Concurso / Cargo",
-          value=concurso_atual if concurso_atual != "Não definido" else "",
+    st.subheader(
+        f"⚙️ Configurar Edital do Concurso: {st.session_state.concurso_selecionado}"
+    )
+
+    if st.session_state.concurso_selecionado == "Geral (Todos)":
+      st.info(
+          "Selecione um concurso específico acima para adicionar matérias ao"
+          " edital correspondente."
       )
-      c1, c2 = st.columns(2)
-      with c1:
-        btn_salvar_concurso = st.form_submit_button("Salvar Concurso")
-      with c2:
-        btn_remover_concurso = st.form_submit_button("Remover Concurso")
+    else:
+      with st.form("form_edital_multi"):
+        st.markdown("##### Adicionar / Atualizar Matéria")
+        f1, f2, f3 = st.columns([3, 1, 1])
+        with f1:
+          mat_input = st.text_input("Nome da Matéria (ex: Direito Administrativo)")
+        with f2:
+          qtd_input = st.text_input("Qtd Questões na Prova", value="10")
+        with f3:
+          peso_input = st.text_input("Peso da Matéria", value="1.0")
 
-      if btn_salvar_concurso:
-        if ent_edital_concurso.strip():
-          db.salvar_config_geral("nome_concurso", ent_edital_concurso.strip())
-          st.success(f"Concurso definido como: '{ent_edital_concurso.strip()}'")
-          st.rerun()
-        else:
-          st.warning("Digite o nome do concurso/cargo!")
-
-      if btn_remover_concurso:
-        db.remover_config_geral("nome_concurso")
-        st.success("Nome do concurso removido!")
-        st.rerun()
-
-    with st.form("form_edital"):
-      st.markdown("##### Adicionar / Atualizar Matéria do Edital")
-      f1, f2, f3 = st.columns([3, 1, 1])
-      with f1:
-        mat_input = st.text_input("Matéria (ex: Português)")
-      with f2:
-        qtd_input = st.text_input("Qtd Prova", value="10")
-      with f3:
-        peso_input = st.text_input("Peso", value="1.0")
-
-      btn_salvar_edital = st.form_submit_button("+ Adicionar Matéria")
-      if btn_salvar_edital:
-        if mat_input.strip() and qtd_input.strip() and peso_input.strip():
-          try:
-            db.salvar_config_edital(
-                mat_input.strip(), int(qtd_input), float(peso_input)
-            )
-            st.success(f"Matéria '{mat_input.strip()}' salva no Edital!")
-            st.rerun()
-          except ValueError:
-            st.error("Quantidade deve ser inteiro e Peso deve ser decimal.")
-        else:
-          st.warning("Preencha todos os campos da matéria!")
+        btn_salvar_edital = st.form_submit_button("+ Adicionar Matéria ao Edital")
+        if btn_salvar_edital:
+          if mat_input.strip() and qtd_input.strip() and peso_input.strip():
+            try:
+              db.salvar_config_edital(
+                  st.session_state.concurso_selecionado,
+                  mat_input.strip(),
+                  int(qtd_input),
+                  float(peso_input),
+              )
+              st.success(
+                  f"Matéria '{mat_input.strip()}' adicionada ao edital de"
+                  f" '{st.session_state.concurso_selecionado}'!"
+              )
+              st.rerun()
+            except ValueError:
+              st.error("Quantidade deve ser inteiro e Peso deve ser decimal.")
+          else:
+            st.warning("Preencha todos os campos da matéria!")
 
   st.markdown("---")
-  concurso_nome_titulo = dados.get("nome_concurso", "")
   titulo_analise = (
-      f"📋 Percentual de rendimento por Matéria — {concurso_nome_titulo}"
-      if concurso_nome_titulo and concurso_nome_titulo != "Não definido"
-      else "📋 Percentual de rendimento por Matéria"
+      f"📋 Rendimento por Matéria — {st.session_state.concurso_selecionado}"
   )
   st.subheader(titulo_analise)
 
@@ -701,17 +743,21 @@ if menu == "📊 Dashboard":
         st.markdown(txt_stats)
       with cols[1]:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🗑️ Excluir Matéria", key=f"del_mat_{item['materia']}"):
-          db.deletar_materia_edital(item["materia"])
+        if (
+            st.session_state.concurso_selecionado != "Geral (Todos)"
+            and st.button("🗑️ Excluir Matéria", key=f"del_mat_{item['materia']}")
+        ):
+          db.remover_materia_edital(
+              st.session_state.concurso_selecionado, item["materia"]
+          )
           st.rerun()
 
 elif menu == "📖 Questões":
   st.title("📖 Resolução de Questões")
-
   cargos = ["Todos"] + cached_obter_cargos_totais()
   f_col1, f_col2, f_col3, f_col4 = st.columns([2, 2, 2, 2])
   with f_col1:
-    cargo_filtro = st.selectbox("Cargo", cargos)
+    cargo_filtro = st.selectbox("Cargo / Concurso", cargos)
   with f_col2:
     mats = ["Todas"] + cached_obter_materias(
         cargo=cargo_filtro if cargo_filtro != "Todos" else None
@@ -757,7 +803,6 @@ elif menu == "📖 Questões":
             f" **Questão {idx + 1} de {len(st.session_state.questoes_lista)}** |"
             f" **Erros:** {total_erros or 0}"
         )
-
         if erros_cons >= 3:
           st.error(
               f"🚨 ALERTA CRÍTICO: Você errou esta questão {erros_cons}x"
@@ -773,7 +818,6 @@ elif menu == "📖 Questões":
 
         opcoes_dict = {"A": op_a, "B": op_b, "C": op_c, "D": op_d, "E": op_e}
         opcoes_validas = {k: v for k, v in opcoes_dict.items() if v and v.strip()}
-
         opcao_escolhida = st.radio(
             "Escolha a alternativa:",
             options=list(opcoes_validas.keys()),
@@ -794,7 +838,6 @@ elif menu == "📖 Questões":
                 "explicacao": explicacao,
             }
             st.rerun()
-
         with col_acao2:
           if st.button("🤖 Resolver com IA"):
             resposta_ia = db.resolver_questao_com_ia(enunciado, opcoes_validas)
@@ -805,7 +848,6 @@ elif menu == "📖 Questões":
                 "explicacao": resposta_ia,
             }
             st.rerun()
-
         with col_acao3:
           if st.button("🗑️ Excluir Questão"):
             db.deletar_questao(q_id)
@@ -827,18 +869,10 @@ elif menu == "📖 Questões":
           res = st.session_state.resultado_atual
           if res["acertou"] is True:
             st.success("🎉 RESPOSTA CORRETA!")
-            st.write(
-                res["explicacao"]
-                if res["explicacao"]
-                else "Sem explicação cadastrada."
-            )
+            st.write(res["explicacao"] or "Sem explicação cadastrada.")
           elif res["acertou"] is False:
             st.error(f"❌ INCORRETA! Gabarito Oficial: ({res['gabarito']})")
-            st.write(
-                res["explicacao"]
-                if res["explicacao"]
-                else "Sem explicação cadastrada."
-            )
+            st.write(res["explicacao"] or "Sem explicação cadastrada.")
           else:
             st.info("🤖 Resposta da IA:")
             st.write(res["explicacao"])
@@ -858,23 +892,14 @@ elif menu == "📖 Questões":
 elif menu == "➕ Cadastrar":
   st.title("➕ Nova Questão & Automação Inteligente")
 
-  with st.expander(
-      "📝 Colar Texto Completo da Questão (IA Separa em A, B, C, D, E)",
-      expanded=True,
-  ):
+  with st.expander("📝 Colar Texto Completo da Questão", expanded=True):
     texto_bruto_input = st.text_area(
-        "Cole aqui o texto inteiro da questão:",
-        height=150,
-        placeholder=(
-            "Ex: Acerca da Lei 8.666/93, assinale a alternativa"
-            " correta...\nLetra A: ...\nLetra B: ..."
-        ),
+        "Cole aqui o texto inteiro da questão:", height=150
     )
     if st.button("⚡ Processar e Separar com IA"):
       if texto_bruto_input.strip():
         with st.spinner("A IA está analisando e separando o texto..."):
           resultado_analise = db.processar_texto_questao_com_ia(texto_bruto_input)
-
           if resultado_analise.startswith("Erro"):
             st.error(resultado_analise)
           else:
@@ -891,109 +916,95 @@ elif menu == "➕ Cadastrar":
               match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
               return match.group(1).strip() if match else ""
 
-            enunciado_ext = extrair_tag("ENUNCIADO", texto_limpo_ia)
-            op_a_ext = extrair_tag("ALTERNATIVA_A", texto_limpo_ia)
-            op_b_ext = extrair_tag("ALTERNATIVA_B", texto_limpo_ia)
-            op_c_ext = extrair_tag("ALTERNATIVA_C", texto_limpo_ia)
-            op_d_ext = extrair_tag("ALTERNATIVA_D", texto_limpo_ia)
-            op_e_ext = extrair_tag("ALTERNATIVA_E", texto_limpo_ia)
-            gab_ext = extrair_tag("GABARITO", texto_limpo_ia).upper()
-            exp_ext = extrair_tag("EXPLICACAO", texto_limpo_ia)
-
-            if enunciado_ext or op_a_ext:
-              st.session_state.form_enunciado = (
-                  enunciado_ext or texto_bruto_input
-              )
-              st.session_state.form_op_a = op_a_ext
-              st.session_state.form_op_b = op_b_ext
-              st.session_state.form_op_c = op_c_ext
-              st.session_state.form_op_d = op_d_ext
-              st.session_state.form_op_e = op_e_ext
-
-              if gab_ext and gab_ext[0] in ["A", "B", "C", "D", "E"]:
-                st.session_state.form_gabarito = gab_ext[0]
-
-              st.session_state.form_explicacao = exp_ext
-              st.success("Texto processado e separado com sucesso!")
-              st.rerun()
-            else:
-              st.warning(
-                  "A IA respondeu, mas não seguiu o formato esperado. "
-                  "Resposta bruta da IA:"
-              )
-              st.text(resultado_analise)
-      else:
-        st.warning("Cole o texto da questão antes de processar.")
+            st.session_state.form_enunciado = (
+                extrair_tag("ENUNCIADO", texto_limpo_ia) or texto_bruto_input
+            )
+            st.session_state.form_op_a = extrair_tag(
+                "ALTERNATIVA_A", texto_limpo_ia
+            )
+            st.session_state.form_op_b = extrair_tag(
+                "ALTERNATIVA_B", texto_limpo_ia
+            )
+            st.session_state.form_op_c = extrair_tag(
+                "ALTERNATIVA_C", texto_limpo_ia
+            )
+            st.session_state.form_op_d = extrair_tag(
+                "ALTERNATIVA_D", texto_limpo_ia
+            )
+            st.session_state.form_op_e = extrair_tag(
+                "ALTERNATIVA_E", texto_limpo_ia
+            )
+            gab = extrair_tag("GABARITO", texto_limpo_ia).upper()
+            if gab and gab[0] in ["A", "B", "C", "D", "E"]:
+              st.session_state.form_gabarito = gab[0]
+            st.session_state.form_explicacao = extrair_tag(
+                "EXPLICACAO", texto_limpo_ia
+            )
+            st.success("Texto processado com sucesso!")
+            st.rerun()
 
   with st.expander("🖼️ Leitura por Imagem (Print/Foto da Questão)"):
     imagem_file = st.file_uploader(
         "Selecione um arquivo de imagem", type=["png", "jpg", "jpeg", "webp"]
     )
-    if imagem_file is not None:
-      if st.button("Processar Imagem com IA"):
-        with open("temp_img.png", "wb") as f:
-          f.write(imagem_file.getbuffer())
-        resposta_ia = db.ler_questao_por_imagem("temp_img.png")
+    if imagem_file is not None and st.button("Processar Imagem com IA"):
+      with open("temp_img.png", "wb") as f:
+        f.write(imagem_file.getbuffer())
+      resposta_ia = db.ler_questao_por_imagem("temp_img.png")
+      if resposta_ia.startswith("Erro"):
+        st.error(resposta_ia)
+      else:
+        texto_limpo_img = (
+            resposta_ia.replace("**", "").replace("*", "").replace("`", "")
+        )
 
-        if resposta_ia.startswith("Erro"):
-          st.error(resposta_ia)
-        else:
-          texto_limpo_img = (
-              resposta_ia.replace("**", "").replace("*", "").replace("`", "")
-          )
+        def extrair_tag_img(tag, texto):
+          pattern = rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
+          match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
+          return match.group(1).strip() if match else ""
 
-          def extrair_tag_img(tag, texto):
-            pattern = (
-                rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
-            )
-            match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
-            return match.group(1).strip() if match else ""
+        st.session_state.form_enunciado = extrair_tag_img(
+            "ENUNCIADO", texto_limpo_img
+        )
+        st.session_state.form_op_a = extrair_tag_img(
+            "ALTERNATIVA_A", texto_limpo_img
+        )
+        st.session_state.form_op_b = extrair_tag_img(
+            "ALTERNATIVA_B", texto_limpo_img
+        )
+        st.session_state.form_op_c = extrair_tag_img(
+            "ALTERNATIVA_C", texto_limpo_img
+        )
+        st.session_state.form_op_d = extrair_tag_img(
+            "ALTERNATIVA_D", texto_limpo_img
+        )
+        st.session_state.form_op_e = extrair_tag_img(
+            "ALTERNATIVA_E", texto_limpo_img
+        )
+        gab_img = extrair_tag_img("GABARITO", texto_limpo_img).upper()
+        if gab_img and gab_img[0] in ["A", "B", "C", "D", "E"]:
+          st.session_state.form_gabarito = gab_img[0]
+        st.session_state.form_explicacao = extrair_tag_img(
+            "EXPLICACAO", texto_limpo_img
+        )
+        st.success("Imagem lida com sucesso!")
+        st.rerun()
 
-          enunciado_img = extrair_tag_img("ENUNCIADO", texto_limpo_img)
-          op_a_img = extrair_tag_img("ALTERNATIVA_A", texto_limpo_img)
-          op_b_img = extrair_tag_img("ALTERNATIVA_B", texto_limpo_img)
-          op_c_img = extrair_tag_img("ALTERNATIVA_C", texto_limpo_img)
-          op_d_img = extrair_tag_img("ALTERNATIVA_D", texto_limpo_img)
-          op_e_img = extrair_tag_img("ALTERNATIVA_E", texto_limpo_img)
-          gab_img = extrair_tag_img("GABARITO", texto_limpo_img).upper()
-          exp_img = extrair_tag_img("EXPLICACAO", texto_limpo_img)
-
-          if enunciado_img or op_a_img:
-            st.session_state.form_enunciado = enunciado_img
-            st.session_state.form_op_a = op_a_img
-            st.session_state.form_op_b = op_b_img
-            st.session_state.form_op_c = op_c_img
-            st.session_state.form_op_d = op_d_img
-            st.session_state.form_op_e = op_e_img
-
-            if gab_img and gab_img[0] in ["A", "B", "C", "D", "E"]:
-              st.session_state.form_gabarito = gab_img[0]
-
-            st.session_state.form_explicacao = exp_img
-            st.success("Imagem lida com sucesso!")
-            st.rerun()
-          else:
-            st.warning("Não foi possível extrair os campos da imagem.")
-            st.text(resposta_ia)
-
-  cargos_iniciais = cached_obter_cargos_totais()
+  cargos_iniciais = db.obter_cargos_totais()
   if not cargos_iniciais:
     cargos_iniciais = ["Cargo / Concurso"]
 
   st.markdown("---")
   st.subheader("📝 Formulário de Revisão e Cadastro")
-
   cad_cargo = st.selectbox(
       "Cargo / Concurso", cargos_iniciais, key="cad_cargo_select"
   )
-
   materias_cargo = cached_obter_materias(cargo=cad_cargo)
   if not materias_cargo:
     materias_cargo = ["Geral"]
 
   with st.form("form_cadastrar_questao"):
     cad_materia = st.selectbox("Matéria", options=materias_cargo)
-
     cad_enunciado = st.text_area(
         "Enunciado da Questão",
         value=st.session_state.form_enunciado,
@@ -1025,12 +1036,7 @@ elif menu == "➕ Cadastrar":
     )
 
     if st.form_submit_button("💾 Salvar Questão Definitivamente"):
-      if (
-          cad_materia.string() if hasattr(cad_materia, "string") else str(cad_materia).strip()
-          and cad_enunciado.strip()
-          and op_a.strip()
-          and op_b.strip()
-      ):
+      if cad_enunciado.strip() and op_a.strip() and op_b.strip():
         db.adicionar_questao(
             cad_cargo,
             cad_materia,
@@ -1045,11 +1051,11 @@ elif menu == "➕ Cadastrar":
         )
         st.success("Questão cadastrada com sucesso no banco de dados!")
       else:
-        st.warning("Preencha a Matéria, Enunciado e as Opções A e B!")
+        st.warning("Preencha o Enunciado e as Opções A e B!")
 
 elif menu == "💾 Backup":
   st.title("💾 Gestão do Banco de Dados")
   st.write(
       "Seus dados estão seguros na nuvem (Supabase). Utilize o painel do Supabase"
-      " para gerenciar backups diretos do banco PostgreSQL."
+      " para gerenciar backups diretos do PostgreSQL."
   )
