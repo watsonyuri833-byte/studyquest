@@ -108,13 +108,47 @@ class DatabaseManager:
             "ALTER TABLE questoes ADD COLUMN materia TEXT DEFAULT ''"
         )
 
-      cursor.execute("""
-            CREATE TABLE IF NOT EXISTS edital_config (
-                materia TEXT PRIMARY KEY,
-                qtd_questoes INTEGER DEFAULT 0,
-                peso REAL DEFAULT 1.0
-            )
-            """)
+      # Verificando e migrando edital_config para incluir cargo por chave composta
+      cursor.execute(
+          "SELECT name FROM sqlite_master WHERE type='table' AND"
+          " name='edital_config'"
+      )
+      tabela_edital_existe = cursor.fetchone()
+
+      if tabela_edital_existe:
+        cursor.execute("PRAGMA table_info(edital_config)")
+        edital_cols = [col[1] for col in cursor.fetchall()]
+        if "cargo" not in edital_cols:
+          cursor.execute(
+              "ALTER TABLE edital_config RENAME TO edital_config_old"
+          )
+          cursor.execute("""
+                    CREATE TABLE edital_config (
+                        cargo TEXT DEFAULT 'Geral',
+                        materia TEXT,
+                        qtd_questoes INTEGER DEFAULT 0,
+                        peso REAL DEFAULT 1.0,
+                        PRIMARY KEY (cargo, materia)
+                    )
+                    """)
+          try:
+            cursor.execute("""
+                        INSERT OR IGNORE INTO edital_config (cargo, materia, qtd_questoes, peso)
+                        SELECT 'Geral', materia, qtd_questoes, peso FROM edital_config_old
+                    """)
+          except Exception:
+            pass
+          cursor.execute("DROP TABLE IF EXISTS edital_config_old")
+      else:
+        cursor.execute("""
+                CREATE TABLE edital_config (
+                    cargo TEXT DEFAULT 'Geral',
+                    materia TEXT,
+                    qtd_questoes INTEGER DEFAULT 0,
+                    peso REAL DEFAULT 1.0,
+                    PRIMARY KEY (cargo, materia)
+                )
+                """)
 
       cursor.execute("""
             CREATE TABLE IF NOT EXISTS historico_respostas (
@@ -242,30 +276,49 @@ class DatabaseManager:
       res = cursor.fetchone()
       return res[0] if res else default
 
-  def salvar_config_edital(self, materia, qtd_questoes, peso):
+  def salvar_config_edital(self, cargo, materia, qtd_questoes, peso):
     with self.get_connection() as conn:
       cursor = conn.cursor()
       cursor.execute(
           """
-                INSERT INTO edital_config (materia, qtd_questoes, peso)
-                VALUES (?, ?, ?)
-                ON CONFLICT(materia) DO UPDATE SET
+                INSERT INTO edital_config (cargo, materia, qtd_questoes, peso)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(cargo, materia) DO UPDATE SET
                     qtd_questoes = excluded.qtd_questoes,
                     peso = excluded.peso
             """,
-          (materia.strip(), int(qtd_questoes), float(peso)),
+          (
+              cargo.strip(),
+              materia.strip(),
+              int(qtd_questoes),
+              float(peso),
+          ),
       )
       conn.commit()
 
-  def remover_materia_edital(self, materia):
-    self.remover_materia_edital(materia)
-
-  def obter_configs_edital(self):
+  def remover_materia_edital(self, cargo, materia):
     with self.get_connection() as conn:
       cursor = conn.cursor()
       cursor.execute(
-          "SELECT materia, qtd_questoes, peso FROM edital_config ORDER BY materia"
+          "DELETE FROM edital_config WHERE cargo = ? AND materia = ?",
+          (cargo.strip(), materia.strip()),
       )
+      conn.commit()
+
+  def obter_configs_edital(self, cargo=None):
+    with self.get_connection() as conn:
+      cursor = conn.cursor()
+      if cargo and cargo != "Não definido" and cargo.strip() != "":
+        cursor.execute(
+            "SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo ="
+            " ? ORDER BY materia",
+            (cargo.strip(),),
+        )
+      else:
+        cursor.execute(
+            "SELECT materia, qtd_questoes, peso FROM edital_config ORDER BY"
+            " materia"
+        )
       return {
           row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
       }
@@ -386,6 +439,11 @@ class DatabaseManager:
             (cargo,),
         )
         materias_banco = [row[0] for row in cursor.fetchall()]
+
+        cursor.execute(
+            "SELECT materia FROM edital_config WHERE cargo = ?", (cargo,)
+        )
+        materias_edital = [row[0] for row in cursor.fetchall()]
       else:
         cursor.execute(
             "SELECT DISTINCT materia FROM questoes WHERE materia IS NOT NULL"
@@ -393,8 +451,8 @@ class DatabaseManager:
         )
         materias_banco = [row[0] for row in cursor.fetchall()]
 
-      cursor.execute("SELECT materia FROM edital_config")
-      materias_edital = [row[0] for row in cursor.fetchall()]
+        cursor.execute("SELECT materia FROM edital_config")
+        materias_edital = [row[0] for row in cursor.fetchall()]
 
       return sorted(list(set(materias_banco + materias_edital)))
 
@@ -442,14 +500,20 @@ class DatabaseManager:
       cursor.execute("DELETE FROM questoes WHERE id = ?", (questao_id,))
       conn.commit()
 
-  def deletar_materia_edital(self, materia):
-    self.remover_materia_edital(materia)
-
   def obter_analise_dashboard(self):
     with self.get_connection() as conn:
       cursor = conn.cursor()
-      configs = self.obter_configs_edital()
-      materias = self.obter_materias()
+      nome_concurso = self.obter_config_geral("nome_concurso", "Geral")
+      cargo_analise = (
+          nome_concurso
+          if nome_concurso and nome_concurso != "Não definido"
+          else "Geral"
+      )
+
+      configs = self.obter_configs_edital(cargo_analise)
+      materias = self.obter_materias(
+          cargo=cargo_analise if cargo_analise != "Geral" else None
+      )
 
       detalhes_materias = []
       materia_mais_critica = "Nenhuma"
@@ -524,7 +588,6 @@ class DatabaseManager:
             "pontos_perdidos": pontos_perdidos_mat,
         })
 
-      nome_concurso = self.obter_config_geral("nome_concurso", "Não definido")
       certas_geral = total_tentativas_geral - total_erros_geral
       taxa_global = (
           (certas_geral / total_tentativas_geral * 100.0)
@@ -607,6 +670,9 @@ if menu == "📊 Dashboard":
     )
 
   dados = db.obter_analise_dashboard()
+  concurso_atual = dados.get("nome_concurso", "Geral")
+  if not concurso_atual or concurso_atual == "Não definido":
+    concurso_atual = "Geral"
 
   total = dados.get("total", 0)
   certas = dados.get("certas", 0)
@@ -652,10 +718,9 @@ if menu == "📊 Dashboard":
   with st.container(border=True):
     st.subheader("⚙️ Configurar Concurso e Edital")
     with st.form("form_concurso"):
-      concurso_atual = dados.get("nome_concurso", "")
       ent_edital_concurso = st.text_input(
           "Nome do Concurso / Cargo",
-          value=concurso_atual if concurso_atual != "Não definido" else "",
+          value=concurso_atual if concurso_atual != "Geral" else "",
       )
       c1, c2 = st.columns(2)
       with c1:
@@ -677,7 +742,10 @@ if menu == "📊 Dashboard":
         st.rerun()
 
     with st.form("form_edital"):
-      st.markdown("##### Adicionar / Atualizar Matéria do Edital")
+      st.markdown(
+          "##### Adicionar / Atualizar Matéria do Edital para:"
+          f" **{concurso_atual}**"
+      )
       f1, f2, f3 = st.columns([3, 1, 1])
       with f1:
         mat_input = st.text_input("Matéria (ex: Português)")
@@ -691,9 +759,15 @@ if menu == "📊 Dashboard":
         if mat_input.strip() and qtd_input.strip() and peso_input.strip():
           try:
             db.salvar_config_edital(
-                mat_input.strip(), int(qtd_input), float(peso_input)
+                concurso_atual,
+                mat_input.strip(),
+                int(qtd_input),
+                float(peso_input),
             )
-            st.success(f"Matéria '{mat_input.strip()}' salva no Edital!")
+            st.success(
+                f"Matéria '{mat_input.strip()}' salva no edital de"
+                f" {concurso_atual}!"
+            )
             st.rerun()
           except ValueError:
             st.error("Quantidade deve ser inteiro e Peso deve ser decimal.")
@@ -701,10 +775,9 @@ if menu == "📊 Dashboard":
           st.warning("Preencha todos os campos da matéria!")
 
   st.markdown("---")
-  concurso_nome_titulo = dados.get("nome_concurso", "")
   titulo_analise = (
-      f"📋 Percentual de rendimento por Matéria — {concurso_nome_titulo}"
-      if concurso_nome_titulo and concurso_nome_titulo != "Não definido"
+      f"📋 Percentual de rendimento por Matéria — {concurso_atual}"
+      if concurso_atual and concurso_atual != "Geral"
       else "📋 Percentual de rendimento por Matéria"
   )
   st.subheader(titulo_analise)
@@ -728,7 +801,7 @@ if menu == "📊 Dashboard":
       with cols[1]:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🗑️ Excluir Matéria", key=f"del_mat_{item['materia']}"):
-          db.deletar_materia_edital(item["materia"])
+          db.remover_materia_edital(concurso_atual, item["materia"])
           st.rerun()
 
 elif menu == "📖 Questões":
@@ -1009,7 +1082,6 @@ elif menu == "➕ Cadastrar":
   st.markdown("---")
   st.subheader("📝 Formulário de Revisão e Cadastro")
 
-  # Cargo colocado fora do form para atualizar dinamicamente as matérias ao ser selecionado
   cad_cargo = st.selectbox(
       "Cargo / Concurso", cargos_iniciais, key="cad_cargo_select"
   )
