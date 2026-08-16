@@ -108,7 +108,6 @@ class DatabaseManager:
       op_a, op_b, op_c, op_d, op_e = "", "", "", "", ""
 
       if matches:
-        # O enunciado é tudo o que vem antes da primeira alternativa encontrada
         enunciado = texto_bruto[: matches[0].start()].strip()
         alt_texts = {}
 
@@ -128,7 +127,6 @@ class DatabaseManager:
         op_d = alt_texts.get("D", "")
         op_e = alt_texts.get("E", "")
 
-        # Limpa vestígios de gabarito ou texto extra no final da última alternativa
         for letra, val in [
             ("A", op_a),
             ("B", op_b),
@@ -175,30 +173,6 @@ class DatabaseManager:
           "gabarito": "A",
           "explicacao": "",
       }
-
-  def processar_texto_questao_com_ia(self, texto_bruto):
-    try:
-      prompt = f"""
-            Atue como um especialista em processamento de dados para concursos públicos. 
-            Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado:
-            ENUNCIADO: [Texto limpo do enunciado da questão]
-            ALTERNATIVA_A: [Texto da opção A sem a letra inicial]
-            ALTERNATIVA_B: [Texto da opção B sem a letra inicial]
-            ALTERNATIVA_C: [Texto da opção C sem a letra inicial, ou deixe vazio se não houver]
-            ALTERNATIVA_D: [Texto da opção D sem a letra inicial, ou deixe vazio se não houver]
-            ALTERNATIVA_E: [Texto da opção E sem a letra inicial, ou deixe vazio se não houver]
-            GABARITO: [Apenas a letra correta se indicada, ex: A, B, C, D ou E]
-            EXPLICACAO: [Explicação ou comentário se houver no texto, ou deixe vazio]
-
-            Texto Bruto da Questão:
-            {texto_bruto}
-            """
-      response = client.models.generate_content(
-          model="gemini-1.5-flash", contents=prompt, config={"temperature": 0.1}
-      )
-      return response.text
-    except Exception as e:
-      return f"Erro ao processar texto com IA: {str(e)}"
 
   def ler_questao_por_imagem(self, image_path):
     try:
@@ -285,7 +259,7 @@ class DatabaseManager:
         cursor.execute(
             "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome ="
             " %s AND materia = %s",
-            (perfil, concurso_nome, materia),
+            (perfil, concurso_nome.strip(), materia.strip()),
         )
         conn.commit()
 
@@ -295,7 +269,7 @@ class DatabaseManager:
         cursor.execute(
             "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome"
             " = %s",
-            (perfil, concurso_nome),
+            (perfil, concurso_nome.strip()),
         )
         conn.commit()
 
@@ -1053,78 +1027,24 @@ elif menu == "➕ Cadastrar":
         "Cole aqui o texto inteiro da questão:", height=150
     )
 
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
-      if st.button(
-          "⚡ Separar Automaticamente (Instantâneo / Sem Erros)",
-          use_container_width=True,
-      ):
-        if texto_bruto_input.strip():
-          dados_separados = db.processar_texto_localmente(texto_bruto_input)
-          st.session_state.form_enunciado = dados_separados["enunciado"]
-          st.session_state.form_op_a = dados_separados["op_a"]
-          st.session_state.form_op_b = dados_separados["op_b"]
-          st.session_state.form_op_c = dados_separados["op_c"]
-          st.session_state.form_op_d = dados_separados["op_d"]
-          st.session_state.form_op_e = dados_separados["op_e"]
-          st.session_state.form_gabarito = dados_separados["gabarito"]
-          st.session_state.form_explicacao = dados_separados["explicacao"]
-          st.success("Texto separado com sucesso localmente!")
-          st.rerun()
-        else:
-          st.warning("Cole o texto da questão primeiro!")
-
-    with c_btn2:
-      if st.button(
-          "🤖 Separar com IA (Opcional)", use_container_width=True
-      ):
-        if texto_bruto_input.strip():
-          with st.spinner("A IA está processando..."):
-            resultado_analise = db.processar_texto_questao_com_ia(
-                texto_bruto_input
-            )
-            if resultado_analise.startswith("Erro"):
-              st.error(resultado_analise)
-            else:
-              texto_limpo_ia = (
-                  resultado_analise.replace("**", "")
-                  .replace("*", "")
-                  .replace("`", "")
-              )
-
-              def extrair_tag(tag, texto):
-                pattern = rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
-                match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
-                return match.group(1).strip() if match else ""
-
-              st.session_state.form_enunciado = (
-                  extrair_tag("ENUNCIADO", texto_limpo_ia) or texto_bruto_input
-              )
-              st.session_state.form_op_a = extrair_tag(
-                  "ALTERNATIVA_A", texto_limpo_ia
-              )
-              st.session_state.form_op_b = extrair_tag(
-                  "ALTERNATIVA_B", texto_limpo_ia
-              )
-              st.session_state.form_op_c = extrair_tag(
-                  "ALTERNATIVA_C", texto_limpo_ia
-              )
-              st.session_state.form_op_d = extrair_tag(
-                  "ALTERNATIVA_D", texto_limpo_ia
-              )
-              st.session_state.form_op_e = extrair_tag(
-                  "ALTERNATIVA_E", texto_limpo_ia
-              )
-              gab = extrair_tag("GABARITO", texto_limpo_ia).upper()
-              if gab and gab[0] in ["A", "B", "C", "D", "E"]:
-                st.session_state.form_gabarito = gab[0]
-              st.session_state.form_explicacao = extrair_tag(
-                  "EXPLICACAO", texto_limpo_ia
-              )
-              st.success("Texto processado com IA com sucesso!")
-              st.rerun()
-        else:
-          st.warning("Cole o texto da questão primeiro!")
+    if st.button(
+        "⚡ Separar Automaticamente (Instantâneo / Sem Erros)",
+        use_container_width=True,
+    ):
+      if texto_bruto_input.strip():
+        dados_separados = db.processar_texto_localmente(texto_bruto_input)
+        st.session_state.form_enunciado = dados_separados["enunciado"]
+        st.session_state.form_op_a = dados_separados["op_a"]
+        st.session_state.form_op_b = dados_separados["op_b"]
+        st.session_state.form_op_c = dados_separados["op_c"]
+        st.session_state.form_op_d = dados_separados["op_d"]
+        st.session_state.form_op_e = dados_separados["op_e"]
+        st.session_state.form_gabarito = dados_separados["gabarito"]
+        st.session_state.form_explicacao = dados_separados["explicacao"]
+        st.success("Texto separado com sucesso localmente!")
+        st.rerun()
+      else:
+        st.warning("Cole o texto da questão primeiro!")
 
   with st.expander("🖼️ Leitura por Imagem (Print/Foto da Questão)"):
     imagem_file = st.file_uploader(
