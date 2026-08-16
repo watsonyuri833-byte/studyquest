@@ -16,6 +16,33 @@ st.set_page_config(
     layout="wide",
 )
 
+# Estilização do Menu Lateral
+st.markdown("""
+    <style>
+        /* Aumenta o espaçamento vertical entre os itens do menu (radio) */
+        div.stRadio > div[role="radiogroup"] {
+            gap: 14px !important;
+        }
+        
+        /* Torna as bolinhas do radio bem visíveis com borda clara e fundo adequado */
+        div.stRadio [data-baseweb="radio"] div:first-child {
+            background-color: #1e1e1e !important;
+            border: 2px solid #00D26A !important; /* Borda destacada */
+        }
+        
+        /* Adiciona um espaçamento interno e efeito hover elegante nas opções */
+        div.stRadio label {
+            padding: 6px 10px !important;
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+        
+        div.stRadio label:hover {
+            background-color: rgba(255, 255, 255, 0.07) !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # ==============================================================================
 # CONFIGURAÇÃO DA API DO GEMINI
 # ==============================================================================
@@ -228,10 +255,7 @@ class DatabaseManager:
       conn.commit()
 
   def remover_materia_edital(self, materia):
-    with self.get_connection() as conn:
-      cursor = conn.cursor()
-      cursor.execute("DELETE FROM edital_config WHERE materia = ?", (materia,))
-      conn.commit()
+    self.remover_materia_edital(materia)
 
   def obter_configs_edital(self):
     with self.get_connection() as conn:
