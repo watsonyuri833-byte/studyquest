@@ -1,4 +1,6 @@
-datetime, os, re
+import datetime
+import os
+import re
 from PIL import Image
 import google.generativeai as genai
 import psycopg2
