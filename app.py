@@ -139,7 +139,7 @@ class DatabaseManager:
     except Exception as e:
       return f"Erro ao processar imagem com IA: {str(e)}"
 
-  def salvar_config_geral(self, perfil, chave, valor):
+  def salvar_config_geral(self, perfil="Watson", chave="", valor=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
@@ -152,7 +152,7 @@ class DatabaseManager:
         )
         conn.commit()
 
-  def remover_config_geral(self, perfil, chave):
+  def remover_config_geral(self, perfil="Watson", chave=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
@@ -161,7 +161,7 @@ class DatabaseManager:
         )
         conn.commit()
 
-  def obter_config_geral(self, perfil, chave, default=""):
+  def obter_config_geral(self, perfil="Watson", chave="", default=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
@@ -172,7 +172,7 @@ class DatabaseManager:
         return res[0] if res else default
 
   def salvar_config_edital(
-      self, perfil, concurso_nome, materia, qtd_questoes, peso
+      self, perfil="Watson", concurso_nome="", materia="", qtd_questoes=10, peso=1.0
   ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
@@ -194,7 +194,7 @@ class DatabaseManager:
         )
         conn.commit()
 
-  def remover_materia_edital(self, perfil, concurso_nome, materia):
+  def remover_materia_edital(self, perfil="Watson", concurso_nome="", materia=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
@@ -204,7 +204,7 @@ class DatabaseManager:
         )
         conn.commit()
 
-  def deletar_concurso_inteiro(self, perfil, concurso_nome):
+  def deletar_concurso_inteiro(self, perfil="Watson", concurso_nome=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
@@ -214,7 +214,7 @@ class DatabaseManager:
         )
         conn.commit()
 
-  def obter_configs_edital(self, perfil, concurso_nome=None):
+  def obter_configs_edital(self, perfil="Watson", concurso_nome=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         if concurso_nome and concurso_nome != "Todos" and concurso_nome.strip():
@@ -233,13 +233,13 @@ class DatabaseManager:
             row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
         }
 
-  def obter_concursos_cadastrados(self, perfil):
+  def obter_concursos_cadastrados(self, perfil="Watson"):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
             "SELECT DISTINCT concurso_nome FROM edital_config WHERE perfil ="
             " %s UNION SELECT DISTINCT cargo FROM questoes WHERE perfil = %s"
-            " AND cargo IS NOT NULL AND cargo !=''",
+            " AND cargo IS NOT NULL AND cargo != ''",
             (perfil, perfil),
         )
         res = [row[0] for row in cursor.fetchall() if row[0]]
@@ -297,7 +297,11 @@ class DatabaseManager:
         return bool(acertou), novo_erros_cons, novo_total_erros
 
   def obter_questoes(
-      self, perfil, cargo=None, materia=None, apenas_reincidentes=False
+      self,
+      perfil="Watson",
+      cargo=None,
+      materia=None,
+      apenas_reincidentes=False,
   ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
@@ -324,7 +328,7 @@ class DatabaseManager:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-  def obter_cargos(self, perfil):
+  def obter_cargos(self, perfil="Watson"):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
@@ -334,14 +338,14 @@ class DatabaseManager:
         )
         return [row[0] for row in cursor.fetchall()]
 
-  def obter_cargos_totais(self, perfil):
+  def obter_cargos_totais(self, perfil="Watson"):
     cargos_set = set(self.obter_concursos_cadastrados(perfil))
     for c in self.obter_cargos(perfil):
       if c:
         cargos_set.add(c)
     return sorted(list(cargos_set))
 
-  def obter_materias(self, perfil, cargo=None):
+  def obter_materias(self, perfil="Watson", cargo=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         if cargo and cargo != "Todos" and cargo != "Cargo / Concurso":
@@ -366,17 +370,17 @@ class DatabaseManager:
 
   def adicionar_questao(
       self,
-      perfil,
-      cargo,
-      materia,
-      enunciado,
-      op_a,
-      op_b,
-      op_c,
-      op_d,
-      op_e,
-      gabarito,
-      explicacao,
+      perfil="Watson",
+      cargo="",
+      materia="",
+      enunciado="",
+      op_a="",
+      op_b="",
+      op_c="",
+      op_d="",
+      op_e="",
+      gabarito="A",
+      explicacao="",
   ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
@@ -411,7 +415,7 @@ class DatabaseManager:
         cursor.execute("DELETE FROM questoes WHERE id = %s", (questao_id,))
         conn.commit()
 
-  def obter_analise_dashboard(self, perfil, concurso_ativo=None):
+  def obter_analise_dashboard(self, perfil="Watson", concurso_ativo=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         configs = self.obter_configs_edital(perfil, concurso_ativo)
@@ -544,6 +548,10 @@ class DatabaseManager:
         }
 
 
+# Limpa qualquer cache anterior para evitar conflito de instâncias
+st.cache_resource.clear()
+
+
 @st.cache_resource
 def get_db():
   return DatabaseManager()
@@ -583,7 +591,7 @@ if "resposta_enviada" not in st.session_state:
 if "resultado_atual" not in st.session_state:
   st.session_state.resultado_atual = None
 if "concurso_selecionado" not in st.session_state:
-  st.session_state.concurso_selecionado = "Geral"
+  st.session_state.concurso_selecionado = "Geral (Todos)"
 
 if "form_enunciado" not in st.session_state:
   st.session_state.form_enunciado = ""
