@@ -862,8 +862,7 @@ elif menu == "➕ Cadastrar":
       expanded=True,
   ):
     texto_bruto_input = st.text_area(
-        "Cole aqui o texto inteiro da questão (incluindo o enunciado, as"
-        " alternativas A, B, C, D, E e opcionalmente gabarito/explicação):",
+        "Cole aqui o texto inteiro da questão:",
         height=150,
         placeholder=(
             "Ex: Acerca da Lei 8.666/93, assinale a alternativa"
@@ -875,40 +874,55 @@ elif menu == "➕ Cadastrar":
         with st.spinner("A IA está analisando e separando o texto..."):
           resultado_analise = db.processar_texto_questao_com_ia(texto_bruto_input)
 
-          def extrair_tag(tag, texto):
-            match = re.search(
-                rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL
+          if resultado_analise.startswith("Erro"):
+            st.error(resultado_analise)
+          else:
+            # Limpeza de formatação markdown caso a IA envie asteriscos
+            texto_limpo_ia = (
+                resultado_analise.replace("**", "")
+                .replace("*", "")
+                .replace("`", "")
             )
-            return match.group(1).strip() if match else ""
 
-          st.session_state.form_enunciado = extrair_tag(
-              "ENUNCIADO", resultado_analise
-          )
-          st.session_state.form_op_a = extrair_tag(
-              "ALTERNATIVA_A", resultado_analise
-          )
-          st.session_state.form_op_b = extrair_tag(
-              "ALTERNATIVA_B", resultado_analise
-          )
-          st.session_state.form_op_c = extrair_tag(
-              "ALTERNATIVA_C", resultado_analise
-          )
-          st.session_state.form_op_d = extrair_tag(
-              "ALTERNATIVA_D", resultado_analise
-          )
-          st.session_state.form_op_e = extrair_tag(
-              "ALTERNATIVA_E", resultado_analise
-          )
+            def extrair_tag(tag, texto):
+              pattern = (
+                  rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
+              )
+              match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
+              return match.group(1).strip() if match else ""
 
-          gab_extraido = extrair_tag("GABARITO", resultado_analise).upper()
-          if gab_extraido in ["A", "B", "C", "D", "E"]:
-            st.session_state.form_gabarito = gab_extraido
+            enunciado_ext = extrair_tag("ENUNCIADO", texto_limpo_ia)
+            op_a_ext = extrair_tag("ALTERNATIVA_A", texto_limpo_ia)
+            op_b_ext = extrair_tag("ALTERNATIVA_B", texto_limpo_ia)
+            op_c_ext = extrair_tag("ALTERNATIVA_C", texto_limpo_ia)
+            op_d_ext = extrair_tag("ALTERNATIVA_D", texto_limpo_ia)
+            op_e_ext = extrair_tag("ALTERNATIVA_E", texto_limpo_ia)
+            gab_ext = extrair_tag("GABARITO", texto_limpo_ia).upper()
+            exp_ext = extrair_tag("EXPLICACAO", texto_limpo_ia)
 
-          st.session_state.form_explicacao = extrair_tag(
-              "EXPLICACAO", resultado_analise
-          )
-          st.success("Texto processado com sucesso!")
-          st.rerun()  # Atualiza a página instantaneamente para preencher os campos abaixo
+            # Só atualiza se encontrar ao menos o enunciado ou a opção A
+            if enunciado_ext or op_a_ext:
+              st.session_state.form_enunciado = (
+                  enunciado_ext or texto_bruto_input
+              )
+              st.session_state.form_op_a = op_a_ext
+              st.session_state.form_op_b = op_b_ext
+              st.session_state.form_op_c = op_c_ext
+              st.session_state.form_op_d = op_d_ext
+              st.session_state.form_op_e = op_e_ext
+
+              if gab_ext and gab_ext[0] in ["A", "B", "C", "D", "E"]:
+                st.session_state.form_gabarito = gab_ext[0]
+
+              st.session_state.form_explicacao = exp_ext
+              st.success("Texto processado e separado com sucesso!")
+              st.rerun()
+            else:
+              st.warning(
+                  "A IA respondeu, mas não seguiu o formato esperado. "
+                  "Resposta bruta da IA:"
+              )
+              st.text(resultado_analise)
       else:
         st.warning("Cole o texto da questão antes de processar.")
 
@@ -922,40 +936,46 @@ elif menu == "➕ Cadastrar":
           f.write(imagem_file.getbuffer())
         resposta_ia = db.ler_questao_por_imagem("temp_img.png")
 
-        def extrair_tag_img(tag, texto):
-          match = re.search(
-              rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL
+        if resposta_ia.startswith("Erro"):
+          st.error(resposta_ia)
+        else:
+          texto_limpo_img = (
+              resposta_ia.replace("**", "").replace("*", "").replace("`", "")
           )
-          return match.group(1).strip() if match else ""
 
-        st.session_state.form_enunciado = extrair_tag_img(
-            "ENUNCIADO", resposta_ia
-        )
-        st.session_state.form_op_a = extrair_tag_img(
-            "ALTERNATIVA_A", resposta_ia
-        )
-        st.session_state.form_op_b = extrair_tag_img(
-            "ALTERNATIVA_B", resposta_ia
-        )
-        st.session_state.form_op_c = extrair_tag_img(
-            "ALTERNATIVA_C", resposta_ia
-        )
-        st.session_state.form_op_d = extrair_tag_img(
-            "ALTERNATIVA_D", resposta_ia
-        )
-        st.session_state.form_op_e = extrair_tag_img(
-            "ALTERNATIVA_E", resposta_ia
-        )
+          def extrair_tag_img(tag, texto):
+            pattern = (
+                rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
+            )
+            match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
+            return match.group(1).strip() if match else ""
 
-        gab_img = extrair_tag_img("GABARITO", resposta_ia).upper()
-        if gab_img in ["A", "B", "C", "D", "E"]:
-          st.session_state.form_gabarito = gab_img
+          enunciado_img = extrair_tag_img("ENUNCIADO", texto_limpo_img)
+          op_a_img = extrair_tag_img("ALTERNATIVA_A", texto_limpo_img)
+          op_b_img = extrair_tag_img("ALTERNATIVA_B", texto_limpo_img)
+          op_c_img = extrair_tag_img("ALTERNATIVA_C", texto_limpo_img)
+          op_d_img = extrair_tag_img("ALTERNATIVA_D", texto_limpo_img)
+          op_e_img = extrair_tag_img("ALTERNATIVA_E", texto_limpo_img)
+          gab_img = extrair_tag_img("GABARITO", texto_limpo_img).upper()
+          exp_img = extrair_tag_img("EXPLICACAO", texto_limpo_img)
 
-        st.session_state.form_explicacao = extrair_tag_img(
-            "EXPLICACAO", resposta_ia
-        )
-        st.success("Imagem lida com sucesso!")
-        st.rerun()  # Atualiza a página instantaneamente
+          if enunciado_img or op_a_img:
+            st.session_state.form_enunciado = enunciado_img
+            st.session_state.form_op_a = op_a_img
+            st.session_state.form_op_b = op_b_img
+            st.session_state.form_op_c = op_c_img
+            st.session_state.form_op_d = op_d_img
+            st.session_state.form_op_e = op_e_img
+
+            if gab_img and gab_img[0] in ["A", "B", "C", "D", "E"]:
+              st.session_state.form_gabarito = gab_img[0]
+
+            st.session_state.form_explicacao = exp_img
+            st.success("Imagem lida com sucesso!")
+            st.rerun()
+          else:
+            st.warning("Não foi possível extrair os campos da imagem.")
+            st.text(resposta_ia)
 
   cargos_iniciais = db.obter_cargos_totais()
   if not cargos_iniciais:
