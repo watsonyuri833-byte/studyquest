@@ -90,7 +90,9 @@ class DatabaseManager:
       cols_edital = [col[1] for col in cursor.fetchall()]
       if "cargo" not in cols_edital:
         try:
-          cursor.execute("ALTER TABLE edital_config ADD COLUMN cargo TEXT")
+          cursor.execute(
+              "ALTER TABLE edital_config ADD COLUMN cargo TEXT DEFAULT ''"
+          )
         except Exception:
           pass
 
@@ -244,16 +246,19 @@ class DatabaseManager:
   def obter_configs_edital(self, cargo=None):
     with self.get_connection() as conn:
       cursor = conn.cursor()
-      if cargo and cargo != "Não definido" and cargo.strip() != "":
-        cursor.execute(
-            "SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo"
-            " = ?",
-            (cargo.strip(),),
-        )
-      else:
-        cursor.execute(
-            "SELECT materia, qtd_questoes, peso FROM edital_config"
-        )
+      try:
+        if cargo and cargo != "Não definido" and cargo.strip() != "":
+          cursor.execute(
+              "SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo"
+              " = ?",
+              (cargo.strip(),),
+          )
+        else:
+          cursor.execute(
+              "SELECT materia, qtd_questoes, peso FROM edital_config"
+          )
+      except sqlite3.OperationalError:
+        cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config")
       return {
           row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
       }
