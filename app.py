@@ -312,8 +312,8 @@ class DatabaseManager:
       cursor = conn.cursor()
       if cargo and cargo != "Não definido" and cargo.strip() != "":
         cursor.execute(
-            "SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo ="
-            " ? ORDER BY materia",
+            "SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo"
+            " = ? ORDER BY materia",
             (cargo.strip(),),
         )
       else:
