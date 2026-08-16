@@ -619,7 +619,7 @@ st.sidebar.title("⚡ STUDYQUEST")
 if "perfil_ativo" not in st.session_state:
   st.session_state.perfil_ativo = "Watson"
 
-perfis_disponiveis = ["Watson", "Esposa"]
+perfis_disponiveis = ["Watson", "Laylla"]
 perfil_escolhido = st.sidebar.selectbox(
     "👤 Perfil Ativo", perfis_disponiveis, key="selectbox_perfil"
 )
