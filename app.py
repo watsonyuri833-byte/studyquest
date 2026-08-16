@@ -17,7 +17,8 @@ st.set_page_config(
 )
 
 # Estilização do Menu Lateral
-st.markdown("""
+st.markdown(
+    """
     <style>
         /* Aumenta o espaçamento vertical entre os itens do menu (radio) */
         div.stRadio > div[role="radiogroup"] {
@@ -41,7 +42,9 @@ st.markdown("""
             background-color: rgba(255, 255, 255, 0.07) !important;
         }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ==============================================================================
 # CONFIGURAÇÃO DA API DO GEMINI
@@ -1006,11 +1009,17 @@ elif menu == "➕ Cadastrar":
   st.markdown("---")
   st.subheader("📝 Formulário de Revisão e Cadastro")
 
+  # Cargo colocado fora do form para atualizar dinamicamente as matérias ao ser selecionado
+  cad_cargo = st.selectbox(
+      "Cargo / Concurso", cargos_iniciais, key="cad_cargo_select"
+  )
+
+  materias_cargo = db.obter_materias(cargo=cad_cargo)
+  if not materias_cargo:
+    materias_cargo = ["Geral"]
+
   with st.form("form_cadastrar_questao"):
-    cad_cargo = st.selectbox(
-        "Cargo / Concurso", cargos_iniciais, key="cad_cargo"
-    )
-    cad_materia = st.text_input("Matéria (ex: Português)", key="cad_materia")
+    cad_materia = st.selectbox("Matéria", options=materias_cargo)
 
     cad_enunciado = st.text_area(
         "Enunciado da Questão",
