@@ -308,15 +308,15 @@ class DatabaseManager:
       conn.commit()
 
  def obter_configs_edital(self, cargo=None):
-    with self.get_connection() as conn:
-      cursor = conn.cursor()
-      if cargo and cargo != "Não definido" and cargo.strip() != "":
-        cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo = ? ORDER BY materia", (cargo.strip(),))
-      else:
-        cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config ORDER BY materia")
-      return {
-          row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
-      }
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if cargo and cargo != "Não definido" and cargo.strip() != "":
+                cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config WHERE cargo = ?", (cargo.strip(),))
+            else:
+                cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config")
+            return {
+                row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
+            }
 
   def registrar_resposta(self, questao_id, resposta_usuario):
     with self.get_connection() as conn:
