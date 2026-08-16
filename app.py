@@ -2,8 +2,7 @@ import datetime
 import os
 import re
 import sqlite3
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from PIL import Image
 import streamlit as st
 
@@ -20,9 +19,12 @@ st.set_page_config(
 # CONFIGURAÇÃO DA API DO GEMINI
 # ==============================================================================
 if "GEMINI_API_KEY" in st.secrets:
-  os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+  api_key_val = st.secrets["GEMINI_API_KEY"]
 else:
-  os.environ["GEMINI_API_KEY"] = ""
+  api_key_val = ""
+
+os.environ["GEMINI_API_KEY"] = api_key_val
+genai.configure(api_key=api_key_val)
 
 DB_NAME = "questoes_estudo.db"
 
@@ -102,7 +104,7 @@ class DatabaseManager:
 
   def resolver_questao_com_ia(self, enunciado, opcoes_dict):
     try:
-      client = genai.Client()
+      model = genai.GenerativeModel("gemini-1.5-flash")
       opcoes_formatadas = "\n".join(
           [f"{k}) {v}" for k, v in opcoes_dict.items() if v and v.strip()]
       )
@@ -122,10 +124,8 @@ class DatabaseManager:
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
 
-      response = client.models.generate_content(
-          model="gemini-2.5-flash",
-          contents=prompt,
-          config=types.GenerateContentConfig(temperature=0.1),
+      response = model.generate_content(
+          prompt, generation_config={"temperature": 0.1}
       )
       return response.text
     except Exception as e:
@@ -133,7 +133,7 @@ class DatabaseManager:
 
   def processar_texto_questao_com_ia(self, texto_bruto):
     try:
-      client = genai.Client()
+      model = genai.GenerativeModel("gemini-1.5-flash")
       prompt = f"""
             Atue como um especialista em processamento de dados para concursos públicos. 
             Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado (com as tags exatas):
@@ -150,10 +150,8 @@ class DatabaseManager:
             {texto_bruto}
             """
 
-      response = client.models.generate_content(
-          model="gemini-2.5-flash",
-          contents=prompt,
-          config=types.GenerateContentConfig(temperature=0.1),
+      response = model.generate_content(
+          prompt, generation_config={"temperature": 0.1}
       )
       return response.text
     except Exception as e:
@@ -161,7 +159,7 @@ class DatabaseManager:
 
   def ler_questao_por_imagem(self, image_path):
     try:
-      client = genai.Client()
+      model = genai.GenerativeModel("gemini-1.5-flash")
       imagem = Image.open(image_path)
 
       prompt = """
@@ -177,10 +175,8 @@ class DatabaseManager:
             EXPLICACAO: [Explicação ou comentário se houver na imagem]
             """
 
-      response = client.models.generate_content(
-          model="gemini-2.5-flash",
-          contents=[prompt, imagem],
-          config=types.GenerateContentConfig(temperature=0.1),
+      response = model.generate_content(
+          [prompt, imagem], generation_config={"temperature": 0.1}
       )
       return response.text
     except Exception as e:
@@ -540,7 +536,6 @@ if "resposta_enviada" not in st.session_state:
 if "resultado_atual" not in st.session_state:
   st.session_state.resultado_atual = None
 
-# Estados para os campos de cadastro (permitir preenchimento via IA)
 if "form_enunciado" not in st.session_state:
   st.session_state.form_enunciado = ""
 if "form_op_a" not in st.session_state:
@@ -590,7 +585,6 @@ if menu == "📊 Dashboard":
   taxa = dados.get("taxa_global", 0.0)
   comentadas = dados.get("comentadas", 0)
 
-  # Bloco superior decorado com cores e cartões mais visuais (com borda)
   st.markdown("### 📈 Visão Geral de Desempenho")
   col1, col2, col3, col4, col5 = st.columns(5)
   with col1:
@@ -853,7 +847,6 @@ elif menu == "📖 Questões":
 elif menu == "➕ Cadastrar":
   st.title("➕ Nova Questão & Automação Inteligente")
 
-  # Funcionalidade de colar texto bruto de questão inteiro para separação por IA
   with st.expander("📝 Colar Texto Completo da Questão (IA Separa em A, B, C, D, E)", expanded=True):
     texto_bruto_input = st.text_area(
         "Cole aqui o texto inteiro da questão (incluindo o enunciado, as alternativas A, B, C, D, E e opcionalmente gabarito/explicação):",
@@ -865,7 +858,6 @@ elif menu == "➕ Cadastrar":
         with st.spinner("A IA está analisando e separando o texto..."):
           resultado_analise = db.processar_texto_questao_com_ia(texto_bruto_input)
 
-          # Extração por tags usando regex simples
           def extrair_tag(tag, texto):
             match = re.search(rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL)
             return match.group(1).strip() if match else ""
