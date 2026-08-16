@@ -80,7 +80,7 @@ class DatabaseManager:
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
       response = client.models.generate_content(
-          model="gemini-2.0-flash",
+          model="gemini-2.5-flash",
           contents=prompt,
           config={"temperature": 0.1},
       )
@@ -108,7 +108,7 @@ class DatabaseManager:
             {texto_bruto}
             """
       response = client.models.generate_content(
-          model="gemini-2.0-flash",
+          model="gemini-2.5-flash",
           contents=prompt,
           config={"temperature": 0.1},
       )
@@ -134,7 +134,7 @@ class DatabaseManager:
             EXPLICACAO: [...]
             """
       response = client.models.generate_content(
-          model="gemini-2.0-flash",
+          model="gemini-2.5-flash",
           contents=[prompt, imagem],
           config={"temperature": 0.1},
       )
