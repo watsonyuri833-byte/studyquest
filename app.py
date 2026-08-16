@@ -608,7 +608,6 @@ if menu == "📊 Dashboard":
       novo_concurso_input = st.text_input("Criar Novo Concurso")
       if st.button("➕ Adicionar Concurso"):
         if novo_concurso_input.strip():
-          # Adiciona uma matéria padrão ou apenas salva no state/edital para criá-lo
           db.salvar_config_edital(
               novo_concurso_input.strip(), "Geral", 10, 1.0
           )
