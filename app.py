@@ -79,7 +79,7 @@ class DatabaseManager:
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="gemini-1.5-flash",
           contents=prompt,
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -106,7 +106,7 @@ class DatabaseManager:
             {texto_bruto}
             """
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="gemini-1.5-flash",
           contents=prompt,
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -131,7 +131,7 @@ class DatabaseManager:
             EXPLICACAO: [...]
             """
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="gemini-1.5-flash",
           contents=[prompt, imagem],
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -642,7 +642,6 @@ perfil_atual = st.session_state.perfil_ativo
 if menu == "📊 Dashboard":
   st.title(f"📊 Dashboard & Análise Estratégica ({perfil_atual})")
 
-  # --- GERENCIADOR DE MÚLTIPLOS CONCURSOS ---
   cargos_cadastrados = db.obter_concursos_cadastrados(perfil_atual)
   opcoes_concurso = ["Geral (Todos)"] + cargos_cadastrados
 
@@ -738,7 +737,6 @@ if menu == "📊 Dashboard":
 
   st.markdown("---")
 
-  # --- FORMULÁRIO DE ADICIONAR MATÉRIAS AO CONCURSO ATIVO ---
   with st.container(border=True):
     st.subheader(
         f"⚙️ Configurar Edital do Concurso: {st.session_state.concurso_selecionado}"
