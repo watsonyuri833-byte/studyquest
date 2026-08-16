@@ -1,10 +1,10 @@
 import datetime
 import os
 import re
-import psycopg2
 from google import genai
 from google.genai import types
 from PIL import Image
+import psycopg2
 import streamlit as st
 
 # ==============================================================================
@@ -139,84 +139,108 @@ class DatabaseManager:
     except Exception as e:
       return f"Erro ao processar imagem com IA: {str(e)}"
 
-  def salvar_config_geral(self, chave, valor):
+  def salvar_config_geral(self, perfil, chave, valor):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
             """
-                INSERT INTO config_geral (chave, valor)
-                VALUES (%s, %s)
-                ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor
+                INSERT INTO config_geral (perfil, chave, valor)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (perfil, chave) DO UPDATE SET valor = EXCLUDED.valor
             """,
-            (chave, valor),
+            (perfil, chave, valor),
         )
         conn.commit()
 
-  def remover_config_geral(self, chave):
+  def remover_config_geral(self, perfil, chave):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        cursor.execute("DELETE FROM config_geral WHERE chave = %s", (chave,))
+        cursor.execute(
+            "DELETE FROM config_geral WHERE perfil = %s AND chave = %s",
+            (perfil, chave),
+        )
         conn.commit()
 
-  def obter_config_geral(self, chave, default=""):
+  def obter_config_geral(self, perfil, chave, default=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        cursor.execute("SELECT valor FROM config_geral WHERE chave = %s", (chave,))
+        cursor.execute(
+            "SELECT valor FROM config_geral WHERE perfil = %s AND chave = %s",
+            (perfil, chave),
+        )
         res = cursor.fetchone()
         return res[0] if res else default
 
-  def salvar_config_edital(self, concurso_nome, materia, qtd_questoes, peso):
+  def salvar_config_edital(
+      self, perfil, concurso_nome, materia, qtd_questoes, peso
+  ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
             """
-                INSERT INTO edital_config (concurso_nome, materia, qtd_questoes, peso)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (concurso_nome, materia) DO UPDATE SET
+                INSERT INTO edital_config (perfil, concurso_nome, materia, qtd_questoes, peso)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (perfil, concurso_nome, materia) DO UPDATE SET
                     qtd_questoes = EXCLUDED.qtd_questoes,
                     peso = EXCLUDED.peso
             """,
-            (concurso_nome.strip(), materia.strip(), int(qtd_questoes), float(peso)),
+            (
+                perfil,
+                concurso_nome.strip(),
+                materia.strip(),
+                int(qtd_questoes),
+                float(peso),
+            ),
         )
         conn.commit()
 
-  def remover_materia_edital(self, concurso_nome, materia):
+  def remover_materia_edital(self, perfil, concurso_nome, materia):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
-            "DELETE FROM edital_config WHERE concurso_nome = %s AND materia = %s",
-            (concurso_nome, materia),
+            "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome ="
+            " %s AND materia = %s",
+            (perfil, concurso_nome, materia),
         )
         conn.commit()
 
-  def deletar_concurso_inteiro(self, concurso_nome):
+  def deletar_concurso_inteiro(self, perfil, concurso_nome):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
-            "DELETE FROM edital_config WHERE concurso_nome = %s", (concurso_nome,)
+            "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome"
+            " = %s",
+            (perfil, concurso_nome),
         )
         conn.commit()
 
-  def obter_configs_edital(self, concurso_nome=None):
+  def obter_configs_edital(self, perfil, concurso_nome=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         if concurso_nome and concurso_nome != "Todos" and concurso_nome.strip():
           cursor.execute(
-              "SELECT materia, qtd_questoes, peso FROM edital_config WHERE concurso_nome = %s",
-              (concurso_nome.strip(),),
+              "SELECT materia, qtd_questoes, peso FROM edital_config WHERE"
+              " perfil = %s AND concurso_nome = %s",
+              (perfil, concurso_nome.strip()),
           )
         else:
-          cursor.execute("SELECT materia, qtd_questoes, peso FROM edital_config")
+          cursor.execute(
+              "SELECT materia, qtd_questoes, peso FROM edital_config WHERE"
+              " perfil = %s",
+              (perfil,),
+          )
         return {
             row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
         }
 
-  def obter_concursos_cadastrados(self):
+  def obter_concursos_cadastrados(self, perfil):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
-            "SELECT DISTINCT concurso_nome FROM edital_config UNION SELECT"
-            " DISTINCT cargo FROM questoes WHERE cargo IS NOT NULL AND cargo !=''"
+            "SELECT DISTINCT concurso_nome FROM edital_config WHERE perfil ="
+            " %s UNION SELECT DISTINCT cargo FROM questoes WHERE perfil = %s"
+            " AND cargo IS NOT NULL AND cargo !=''",
+            (perfil, perfil),
         )
         res = [row[0] for row in cursor.fetchall() if row[0]]
         return sorted(res)
@@ -273,16 +297,16 @@ class DatabaseManager:
         return bool(acertou), novo_erros_cons, novo_total_erros
 
   def obter_questoes(
-      self, cargo=None, materia=None, apenas_reincidentes=False
+      self, perfil, cargo=None, materia=None, apenas_reincidentes=False
   ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         query = (
             "SELECT id, cargo, materia, enunciado, opcao_a, opcao_b, opcao_c,"
             " opcao_d, opcao_e, gabarito, explicacao, total_tentativas,"
-            " total_erros, erros_consecutivos FROM questoes WHERE 1=1"
+            " total_erros, erros_consecutivos FROM questoes WHERE perfil = %s"
         )
-        params = []
+        params = [perfil]
         if (
             cargo
             and cargo != "Todos"
@@ -300,45 +324,49 @@ class DatabaseManager:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-  def obter_cargos(self):
+  def obter_cargos(self, perfil):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         cursor.execute(
-            "SELECT DISTINCT cargo FROM questoes WHERE cargo IS NOT NULL AND"
-            " cargo != '' ORDER BY cargo"
+            "SELECT DISTINCT cargo FROM questoes WHERE perfil = %s AND cargo"
+            " IS NOT NULL AND cargo != '' ORDER BY cargo",
+            (perfil,),
         )
         return [row[0] for row in cursor.fetchall()]
 
-  def obter_cargos_totais(self):
-    cargos_set = set(self.obter_concursos_cadastrados())
-    for c in self.obter_cargos():
+  def obter_cargos_totais(self, perfil):
+    cargos_set = set(self.obter_concursos_cadastrados(perfil))
+    for c in self.obter_cargos(perfil):
       if c:
         cargos_set.add(c)
     return sorted(list(cargos_set))
 
-  def obter_materias(self, cargo=None):
+  def obter_materias(self, perfil, cargo=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
         if cargo and cargo != "Todos" and cargo != "Cargo / Concurso":
           cursor.execute(
-              "SELECT DISTINCT materia FROM questoes WHERE cargo = %s AND"
-              " materia IS NOT NULL AND materia != '' ORDER BY materia",
-              (cargo,),
+              "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
+              " cargo = %s AND materia IS NOT NULL AND materia != '' ORDER BY"
+              " materia",
+              (perfil, cargo),
           )
           materias_banco = [row[0] for row in cursor.fetchall()]
         else:
           cursor.execute(
-              "SELECT DISTINCT materia FROM questoes WHERE materia IS NOT NULL"
-              " AND materia != '' ORDER BY materia"
+              "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
+              " materia IS NOT NULL AND materia != '' ORDER BY materia",
+              (perfil,),
           )
           materias_banco = [row[0] for row in cursor.fetchall()]
 
-        configs = self.obter_configs_edital(cargo)
+        configs = self.obter_configs_edital(perfil, cargo)
         materias_edital = list(configs.keys())
         return sorted(list(set(materias_banco + materias_edital)))
 
   def adicionar_questao(
       self,
+      perfil,
       cargo,
       materia,
       enunciado,
@@ -354,10 +382,11 @@ class DatabaseManager:
       with conn.cursor() as cursor:
         cursor.execute(
             """
-                INSERT INTO questoes (cargo, materia, enunciado, opcao_a, opcao_b, opcao_c, opcao_d, opcao_e, gabarito, explicacao)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO questoes (perfil, cargo, materia, enunciado, opcao_a, opcao_b, opcao_c, opcao_d, opcao_e, gabarito, explicacao)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
+                perfil,
                 cargo.strip(),
                 materia.strip(),
                 enunciado,
@@ -382,21 +411,23 @@ class DatabaseManager:
         cursor.execute("DELETE FROM questoes WHERE id = %s", (questao_id,))
         conn.commit()
 
-  def obter_analise_dashboard(self, concurso_ativo=None):
+  def obter_analise_dashboard(self, perfil, concurso_ativo=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        configs = self.obter_configs_edital(concurso_ativo)
+        configs = self.obter_configs_edital(perfil, concurso_ativo)
         materias_edital = list(configs.keys())
 
         if concurso_ativo and concurso_ativo != "Todos":
           cursor.execute(
-              "SELECT DISTINCT materia FROM questoes WHERE cargo = %s AND"
-              " materia IS NOT NULL",
-              (concurso_ativo,),
+              "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
+              " cargo = %s AND materia IS NOT NULL",
+              (perfil, concurso_ativo),
           )
         else:
           cursor.execute(
-              "SELECT DISTINCT materia FROM questoes WHERE materia IS NOT NULL"
+              "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
+              " materia IS NOT NULL",
+              (perfil,),
           )
         materias_questoes = [row[0] for row in cursor.fetchall()]
         materias = sorted(list(set(materias_edital + materias_questoes)))
@@ -411,14 +442,15 @@ class DatabaseManager:
 
         if concurso_ativo and concurso_ativo != "Todos":
           cursor.execute(
-              "SELECT COUNT(id) FROM questoes WHERE cargo = %s AND explicacao IS"
-              " NOT NULL AND TRIM(explicacao) != ''",
-              (concurso_ativo,),
+              "SELECT COUNT(id) FROM questoes WHERE perfil = %s AND cargo = %s"
+              " AND explicacao IS NOT NULL AND TRIM(explicacao) != ''",
+              (perfil, concurso_ativo),
           )
         else:
           cursor.execute(
-              "SELECT COUNT(id) FROM questoes WHERE explicacao IS NOT NULL AND"
-              " TRIM(explicacao) != ''"
+              "SELECT COUNT(id) FROM questoes WHERE perfil = %s AND"
+              " explicacao IS NOT NULL AND TRIM(explicacao) != ''",
+              (perfil,),
           )
         total_comentadas = cursor.fetchone()[0] or 0
 
@@ -431,17 +463,17 @@ class DatabaseManager:
             cursor.execute(
                 """
                         SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
-                        FROM questoes WHERE cargo = %s AND materia = %s
+                        FROM questoes WHERE perfil = %s AND cargo = %s AND materia = %s
                     """,
-                (concurso_ativo, mat),
+                (perfil, concurso_ativo, mat),
             )
           else:
             cursor.execute(
                 """
                         SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
-                        FROM questoes WHERE materia = %s
+                        FROM questoes WHERE perfil = %s AND materia = %s
                     """,
-                (mat,),
+                (perfil, mat),
             )
 
           q_cad, tent, erros = cursor.fetchone()
@@ -522,23 +554,23 @@ db = get_db()
 
 # --- FUNÇÕES CACHEADAS ---
 @st.cache_data(ttl=60)
-def cached_obter_analise_dashboard(concurso_ativo):
-  return db.obter_analise_dashboard(concurso_ativo)
+def cached_obter_analise_dashboard(perfil, concurso_ativo):
+  return db.obter_analise_dashboard(perfil, concurso_ativo)
 
 
 @st.cache_data(ttl=60)
-def cached_obter_questoes(cargo, materia, apenas_reincidentes):
-  return db.obter_questoes(cargo, materia, apenas_reincidentes)
+def cached_obter_questoes(perfil, cargo, materia, apenas_reincidentes):
+  return db.obter_questoes(perfil, cargo, materia, apenas_reincidentes)
 
 
 @st.cache_data(ttl=300)
-def cached_obter_cargos_totais():
-  return db.obter_cargos_totais()
+def cached_obter_cargos_totais(perfil):
+  return db.obter_cargos_totais(perfil)
 
 
 @st.cache_data(ttl=300)
-def cached_obter_materias(cargo):
-  return db.obter_materias(cargo)
+def cached_obter_materias(perfil, cargo):
+  return db.obter_materias(perfil, cargo)
 
 
 # Inicialização do Session State
@@ -574,15 +606,36 @@ if "form_explicacao" not in st.session_state:
 # FRONTEND: STREAMLIT APP UI
 # ==============================================================================
 st.sidebar.title("⚡ STUDYQUEST")
+
+# --- SELETOR DE PERFIL ---
+if "perfil_ativo" not in st.session_state:
+  st.session_state.perfil_ativo = "Watson"
+
+perfis_disponiveis = ["Watson", "Esposa"]
+perfil_escolhido = st.sidebar.selectbox(
+    "👤 Perfil Ativo", perfis_disponiveis, key="selectbox_perfil"
+)
+
+if perfil_escolhido != st.session_state.perfil_ativo:
+  st.session_state.perfil_ativo = perfil_escolhido
+  st.session_state.questoes_lista = []
+  st.session_state.indice_atual = 0
+  st.session_state.resposta_enviada = False
+  st.session_state.resultado_atual = None
+  st.rerun()
+
+st.sidebar.markdown("---")
 menu = st.sidebar.radio(
     "Navegação", ["📊 Dashboard", "📖 Questões", "➕ Cadastrar", "💾 Backup"]
 )
 
+perfil_atual = st.session_state.perfil_ativo
+
 if menu == "📊 Dashboard":
-  st.title("📊 Dashboard & Análise Estratégica")
+  st.title(f"📊 Dashboard & Análise Estratégica ({perfil_atual})")
 
   # --- GERENCIADOR DE MÚLTIPLOS CONCURSOS ---
-  cargos_cadastrados = db.obter_concursos_cadastrados()
+  cargos_cadastrados = db.obter_concursos_cadastrados(perfil_atual)
   opcoes_concurso = ["Geral (Todos)"] + cargos_cadastrados
 
   with st.container(border=True):
@@ -590,7 +643,6 @@ if menu == "📊 Dashboard":
     col_sel, col_novo, col_del = st.columns([3, 3, 2])
 
     with col_sel:
-      # Sincronizar índice atual
       current_idx = 0
       if st.session_state.concurso_selecionado in opcoes_concurso:
         current_idx = opcoes_concurso.index(
@@ -609,7 +661,7 @@ if menu == "📊 Dashboard":
       if st.button("➕ Adicionar Concurso"):
         if novo_concurso_input.strip():
           db.salvar_config_edital(
-              novo_concurso_input.strip(), "Geral", 10, 1.0
+              perfil_atual, novo_concurso_input.strip(), "Geral", 10, 1.0
           )
           st.session_state.concurso_selecionado = novo_concurso_input.strip()
           st.success(f"Concurso '{novo_concurso_input.strip()}' criado!")
@@ -623,7 +675,9 @@ if menu == "📊 Dashboard":
           st.session_state.concurso_selecionado != "Geral (Todos)"
           and st.button("🗑️ Excluir Concurso Ativo", use_container_width=True)
       ):
-        db.deletar_concurso_inteiro(st.session_state.concurso_selecionado)
+        db.deletar_concurso_inteiro(
+            perfil_atual, st.session_state.concurso_selecionado
+        )
         st.success("Concurso excluído!")
         st.session_state.concurso_selecionado = "Geral (Todos)"
         st.rerun()
@@ -633,7 +687,7 @@ if menu == "📊 Dashboard":
       if st.session_state.concurso_selecionado == "Geral (Todos)"
       else st.session_state.concurso_selecionado
   )
-  dados = cached_obter_analise_dashboard(ativo_param)
+  dados = cached_obter_analise_dashboard(perfil_atual, ativo_param)
 
   total = dados.get("total", 0)
   certas = dados.get("certas", 0)
@@ -703,6 +757,7 @@ if menu == "📊 Dashboard":
           if mat_input.strip() and qtd_input.strip() and peso_input.strip():
             try:
               db.salvar_config_edital(
+                  perfil_atual,
                   st.session_state.concurso_selecionado,
                   mat_input.strip(),
                   int(qtd_input),
@@ -747,19 +802,20 @@ if menu == "📊 Dashboard":
             and st.button("🗑️ Excluir Matéria", key=f"del_mat_{item['materia']}")
         ):
           db.remover_materia_edital(
-              st.session_state.concurso_selecionado, item["materia"]
+              perfil_atual, st.session_state.concurso_selecionado, item["materia"]
           )
           st.rerun()
 
 elif menu == "📖 Questões":
-  st.title("📖 Resolução de Questões")
-  cargos = ["Todos"] + cached_obter_cargos_totais()
+  st.title(f"📖 Resolução de Questões ({perfil_atual})")
+  cargos = ["Todos"] + cached_obter_cargos_totais(perfil_atual)
   f_col1, f_col2, f_col3, f_col4 = st.columns([2, 2, 2, 2])
   with f_col1:
     cargo_filtro = st.selectbox("Cargo / Concurso", cargos)
   with f_col2:
     mats = ["Todas"] + cached_obter_materias(
-        cargo=cargo_filtro if cargo_filtro != "Todos" else None
+        perfil_atual,
+        cargo=cargo_filtro if cargo_filtro != "Todos" else None,
     )
     materia_filtro = st.selectbox("Matéria", mats)
   with f_col3:
@@ -768,7 +824,7 @@ elif menu == "📖 Questões":
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔍 Carregar Questões", use_container_width=True):
       st.session_state.questoes_lista = cached_obter_questoes(
-          cargo_filtro, materia_filtro, apenas_reincidentes
+          perfil_atual, cargo_filtro, materia_filtro, apenas_reincidentes
       )
       st.session_state.indice_atual = 0
       st.session_state.resposta_enviada = False
@@ -889,7 +945,7 @@ elif menu == "📖 Questões":
     )
 
 elif menu == "➕ Cadastrar":
-  st.title("➕ Nova Questão & Automação Inteligente")
+  st.title(f"➕ Nova Questão & Automação Inteligente ({perfil_atual})")
 
   with st.expander("📝 Colar Texto Completo da Questão", expanded=True):
     texto_bruto_input = st.text_area(
@@ -989,7 +1045,7 @@ elif menu == "➕ Cadastrar":
         st.success("Imagem lida com sucesso!")
         st.rerun()
 
-  cargos_iniciais = db.obter_cargos_totais()
+  cargos_iniciais = db.obter_cargos_totais(perfil_atual)
   if not cargos_iniciais:
     cargos_iniciais = ["Cargo / Concurso"]
 
@@ -998,7 +1054,7 @@ elif menu == "➕ Cadastrar":
   cad_cargo = st.selectbox(
       "Cargo / Concurso", cargos_iniciais, key="cad_cargo_select"
   )
-  materias_cargo = cached_obter_materias(cargo=cad_cargo)
+  materias_cargo = cached_obter_materias(perfil_atual, cargo=cad_cargo)
   if not materias_cargo:
     materias_cargo = ["Geral"]
 
@@ -1037,6 +1093,7 @@ elif menu == "➕ Cadastrar":
     if st.form_submit_button("💾 Salvar Questão Definitivamente"):
       if cad_enunciado.strip() and op_a.strip() and op_b.strip():
         db.adicionar_questao(
+            perfil_atual,
             cad_cargo,
             cad_materia,
             cad_enunciado,
@@ -1053,7 +1110,7 @@ elif menu == "➕ Cadastrar":
         st.warning("Preencha o Enunciado e as Opções A e B!")
 
 elif menu == "💾 Backup":
-  st.title("💾 Gestão do Banco de Dados")
+  st.title(f"💾 Gestão do Banco de Dados ({perfil_atual})")
   st.write(
       "Seus dados estão seguros na nuvem (Supabase). Utilize o painel do Supabase"
       " para gerenciar backups diretos do PostgreSQL."
