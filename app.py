@@ -79,7 +79,7 @@ class DatabaseManager:
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
       response = client.models.generate_content(
-          model="gemini-2.0-flash",
+          model="gemini-2.5-flash",
           contents=prompt,
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -106,7 +106,7 @@ class DatabaseManager:
             {texto_bruto}
             """
       response = client.models.generate_content(
-          model="gemini-2.0-flash",
+          model="gemini-2.5-flash",
           contents=prompt,
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -131,7 +131,7 @@ class DatabaseManager:
             EXPLICACAO: [...]
             """
       response = client.models.generate_content(
-          model="gemini-2.0-flash",
+          model="gemini-2.5-flash",
           contents=[prompt, imagem],
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -619,7 +619,7 @@ st.sidebar.title("⚡ STUDYQUEST")
 if "perfil_ativo" not in st.session_state:
   st.session_state.perfil_ativo = "Watson"
 
-perfis_disponiveis = ["Watson", "Laylla"]
+perfis_disponiveis = ["Watson", "Esposa"]
 perfil_escolhido = st.sidebar.selectbox(
     "👤 Perfil Ativo", perfis_disponiveis, key="selectbox_perfil"
 )
