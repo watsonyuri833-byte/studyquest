@@ -59,7 +59,7 @@ class DatabaseManager:
 
   def resolver_questao_com_ia(self, enunciado, opcoes_dict):
     try:
-      model = genai.GenerativeModel("gemini-1.5-flash")
+      model = genai.GenerativeModel("gemini-2.0-flash")
       opcoes_formatadas = "\n".join(
           [f"{k}) {v}" for k, v in opcoes_dict.items() if v and v.strip()]
       )
@@ -86,7 +86,7 @@ class DatabaseManager:
 
   def processar_texto_questao_com_ia(self, texto_bruto):
     try:
-      model = genai.GenerativeModel("gemini-1.5-flash")
+      model = genai.GenerativeModel("gemini-2.0-flash")
       prompt = f"""
             Atue como um especialista em processamento de dados para concursos públicos. 
             Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado:
@@ -111,7 +111,7 @@ class DatabaseManager:
 
   def ler_questao_por_imagem(self, image_path):
     try:
-      model = genai.GenerativeModel("gemini-1.5-flash")
+      model = genai.GenerativeModel("gemini-2.0-flash")
       imagem = Image.open(image_path)
       prompt = """
             Analise a imagem anexada, contendo uma questão de concurso.
