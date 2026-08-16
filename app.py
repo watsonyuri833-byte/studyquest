@@ -1,9 +1,6 @@
-import datetime
-import os
-import re
-from google import genai
-from google.genai import types
+datetime, os, re
 from PIL import Image
+import google.generativeai as genai
 import psycopg2
 import streamlit as st
 
@@ -41,10 +38,10 @@ st.markdown(
 )
 
 # ==============================================================================
-# CONFIGURAÇÃO DA API DO GEMINI
+# CONFIGURAÇÃO DA API DO GEMINI (SDK CLÁSSICO ESTÁVEL)
 # ==============================================================================
 if "GEMINI_API_KEY" in st.secrets:
-  os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+  genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 
 # ==============================================================================
@@ -60,7 +57,7 @@ class DatabaseManager:
 
   def resolver_questao_com_ia(self, enunciado, opcoes_dict):
     try:
-      client = genai.Client()
+      model = genai.GenerativeModel("gemini-1.5-flash")
       opcoes_formatadas = "\n".join(
           [f"{k}) {v}" for k, v in opcoes_dict.items() if v and v.strip()]
       )
@@ -78,10 +75,8 @@ class DatabaseManager:
             RESPOSTA: [Letra]
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
-      response = client.models.generate_content(
-          model="gemini-1.5-flash",
-          contents=prompt,
-          config=types.GenerateContentConfig(temperature=0.1),
+      response = model.generate_content(
+          prompt, generation_config={"temperature": 0.1}
       )
       return response.text
     except Exception as e:
@@ -89,7 +84,7 @@ class DatabaseManager:
 
   def processar_texto_questao_com_ia(self, texto_bruto):
     try:
-      client = genai.Client()
+      model = genai.GenerativeModel("gemini-1.5-flash")
       prompt = f"""
             Atue como um especialista em processamento de dados para concursos públicos. 
             Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado:
@@ -105,10 +100,8 @@ class DatabaseManager:
             Texto Bruto da Questão:
             {texto_bruto}
             """
-      response = client.models.generate_content(
-          model="gemini-1.5-flash",
-          contents=prompt,
-          config=types.GenerateContentConfig(temperature=0.1),
+      response = model.generate_content(
+          prompt, generation_config={"temperature": 0.1}
       )
       return response.text
     except Exception as e:
@@ -116,7 +109,7 @@ class DatabaseManager:
 
   def ler_questao_por_imagem(self, image_path):
     try:
-      client = genai.Client()
+      model = genai.GenerativeModel("gemini-1.5-flash")
       imagem = Image.open(image_path)
       prompt = """
             Analise a imagem anexada, contendo uma questão de concurso.
@@ -130,10 +123,8 @@ class DatabaseManager:
             GABARITO: [...]
             EXPLICACAO: [...]
             """
-      response = client.models.generate_content(
-          model="gemini-1.5-flash",
-          contents=[prompt, imagem],
-          config=types.GenerateContentConfig(temperature=0.1),
+      response = model.generate_content(
+          [prompt, imagem], generation_config={"temperature": 0.1}
       )
       return response.text
     except Exception as e:
