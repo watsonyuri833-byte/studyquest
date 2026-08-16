@@ -19,13 +19,10 @@ st.set_page_config(
 # ==============================================================================
 # CONFIGURAÇÃO DA API DO GEMINI
 # ==============================================================================
-# Configuração segura da API do Gemini para a nuvem
 if "GEMINI_API_KEY" in st.secrets:
   os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 else:
-  # Caso queira rodar localmente com a chave fixa de fallback
   os.environ["GEMINI_API_KEY"] = ""
-  
 
 DB_NAME = "questoes_estudo.db"
 
@@ -422,6 +419,9 @@ class DatabaseManager:
       cursor.execute("DELETE FROM questoes WHERE id = ?", (questao_id,))
       conn.commit()
 
+  def deletar_materia_edital(self, materia):
+    self.remover_materia_edital(materia)
+
   def obter_analise_dashboard(self):
     with self.get_connection() as conn:
       cursor = conn.cursor()
@@ -436,6 +436,13 @@ class DatabaseManager:
       pontuacao_projetada = 0.0
       total_erros_geral = 0
       total_tentativas_geral = 0
+
+      # Quantidade de questões comentadas (possuem explicação cadastrada)
+      cursor.execute(
+          "SELECT COUNT(id) FROM questoes WHERE explicacao IS NOT NULL AND"
+          " TRIM(explicacao) != ''"
+      )
+      total_comentadas = cursor.fetchone()[0] or 0
 
       for mat in materias:
         cfg = configs.get(mat, {"qtd": 0, "peso": 1.0})
@@ -487,6 +494,8 @@ class DatabaseManager:
             "peso": peso,
             "q_cadastradas": q_cad,
             "tentativas": tent,
+            "certas": acertos,
+            "erradas": erros,
             "erros": erros,
             "taxa_acerto": taxa_acerto,
             "pontos_possiveis": pontos_possiveis_mat,
@@ -495,6 +504,12 @@ class DatabaseManager:
         })
 
       nome_concurso = self.obter_config_geral("nome_concurso", "Não definido")
+      certas_geral = total_tentativas_geral - total_erros_geral
+      taxa_global = (
+          (certas_geral / total_tentativas_geral * 100.0)
+          if total_tentativas_geral > 0
+          else 0.0
+      )
 
       return {
           "nome_concurso": nome_concurso,
@@ -504,15 +519,13 @@ class DatabaseManager:
           ),
           "pontuacao_projetada": pontuacao_projetada,
           "pontuacao_maxima": pontuacao_maxima_prova,
+          "total": total_tentativas_geral,
+          "certas": certas_geral,
+          "erradas": total_erros_geral,
+          "comentadas": total_comentadas,
           "total_erros_geral": total_erros_geral,
           "total_tentativas_geral": total_tentativas_geral,
-          "taxa_global": (
-              (total_tentativas_geral - total_erros_geral)
-              / total_tentativas_geral
-              * 100.0
-          )
-          if total_tentativas_geral > 0
-          else 0.0,
+          "taxa_global": taxa_global,
       }
 
 
@@ -542,20 +555,54 @@ menu = st.sidebar.radio(
 )
 
 if menu == "📊 Dashboard":
-  st.title("📊 Dashboard & Análise Estratégica")
+  # Cabeçalho com Filtro de Período integrando a lógica solicitada[cite: 5, 6]
+  col_title, col_filter = st.columns([3, 1])
+  with col_title:
+    st.title("📊 Dashboard & Análise Estratégica")
+  with col_filter:
+    periodo_selecionado = st.selectbox(
+        "Período",
+        [
+            "Últimos 7 dias",
+            "Últimos 15 dias",
+            "Últimos 30 dias",
+            "Todo o período",
+        ],
+        key="cb_periodo",
+    )
 
   dados = db.obter_analise_dashboard()
 
-  col1, col2, col3 = st.columns(3)
+  # Métricas Principais baseadas na estrutura de cartões do dashboard[cite: 5, 6]
+  total = dados.get("total", 0)
+  certas = dados.get("certas", 0)
+  erradas = dados.get("erradas", 0)
+  taxa = dados.get("taxa_global", 0.0)
+  comentadas = dados.get("comentadas", 0)
+
+  col1, col2, col3, col4, col5 = st.columns(5)
   with col1:
+    st.metric("Total de Resoluções", total)
+  with col2:
+    st.metric("Resoluções Certas", certas)
+  with col3:
+    st.metric("Resoluções Erradas", erradas)
+  with col4:
+    st.metric("Taxa de Acerto", f"{taxa:.2f}%")
+  with col5:
+    st.metric("Questões Comentadas", comentadas)
+
+  st.markdown("---")
+
+  # Informações complementares de Projeção e Ponto Cego
+  c_info1, c_info2 = st.columns(2)
+  with c_info1:
     st.metric(
         "PONTUAÇÃO PROJETADA",
         f"{dados['pontuacao_projetada']:.1f} / {dados['pontuacao_maxima']:.1f}",
     )
-  with col2:
+  with c_info2:
     st.metric("⚠️ PONTO CEGO", dados["materia_mais_critica"])
-  with col3:
-    st.metric("APROVEITAMENTO GERAL", f"{dados['taxa_global']:.1f}%")
 
   st.markdown("---")
   st.subheader("⚙️ Configurar Concurso e Edital")
@@ -612,31 +659,32 @@ if menu == "📊 Dashboard":
   st.markdown("---")
   concurso_nome_titulo = dados.get("nome_concurso", "")
   titulo_analise = (
-      f"📋 Análise Estratégica por Matéria — {concurso_nome_titulo}"
+      f"📋 Percentual de rendimento por Matéria — {concurso_nome_titulo}"
       if concurso_nome_titulo and concurso_nome_titulo != "Não definido"
-      else "📋 Análise Estratégica por Matéria"
+      else "📋 Percentual de rendimento por Matéria"
   )
   st.subheader(titulo_analise)
 
+  # Seção inferior de detalhamento por matéria com progresso visual[cite: 5, 6]
   for item in dados["materias_detalhes"]:
     with st.container():
-      cols = st.columns([3, 2, 1])
+      cols = st.columns([3, 1])
       with cols[0]:
         st.markdown(f"**{item['materia']}**")
-        st.caption(
-            f"Edital: {item['qtd_prova']} q. (Peso {item['peso']:.1f}) | No"
-            f" banco: {item['tentativas']} resolvidas"
+        taxa_mat = item["taxa_acerto"]
+        st.progress(
+            int(taxa_mat) if taxa_mat <= 100 else 100, text=f"{taxa_mat:.1f}%"
         )
+        txt_stats = (
+            f"Acertos: {item.get('certas', 0)} | Erros:"
+            f" {item.get('erradas', 0)} | Taxa: {taxa_mat:.1f}%"
+            f" ({item['tentativas']} resoluções) | Edital: {item['qtd_prova']}"
+            f" q. (Peso {item['peso']:.1f})"
+        )
+        st.caption(txt_stats)
       with cols[1]:
-        txt_perda = (
-            f"Perda: -{item['pontos_perdidos']:.1f} pts"
-            if item["tentativas"] > 0
-            else "Sem dados praticados"
-        )
-        st.markdown(f"Acerto: **{item['taxa_acerto']:.1f}%**")
-        st.caption(txt_perda)
-      with cols[2]:
-        if st.button("🗑️", key=f"del_mat_{item['materia']}"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🗑️ Excluir Matéria", key=f"del_mat_{item['materia']}"):
           db.deletar_materia_edital(item["materia"])
           st.rerun()
       st.markdown("---")
