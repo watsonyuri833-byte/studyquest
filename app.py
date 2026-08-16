@@ -230,6 +230,12 @@ class DatabaseManager:
   ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
+        # Se estiver adicionando uma matéria real, remove o placeholder vazio se existir
+        if materia.strip():
+          cursor.execute(
+              "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome = %s AND (materia = '' OR materia IS NULL)",
+              (perfil, concurso_nome.strip())
+          )
         cursor.execute(
             """
                 INSERT INTO edital_config (perfil, concurso_nome, materia, qtd_questoes, peso)
@@ -268,6 +274,23 @@ class DatabaseManager:
           cursor.execute("DELETE FROM historico_respostas WHERE questao_id = %s", (q_id,))
           cursor.execute("DELETE FROM questoes WHERE id = %s", (q_id,))
         
+        # Verifica se ainda restou alguma matéria cadastrada para este concurso
+        cursor.execute(
+            "SELECT COUNT(*) FROM edital_config WHERE perfil = %s AND concurso_nome = %s AND materia != '' AND materia IS NOT NULL",
+            (perfil, concurso_nome.strip())
+        )
+        restantes = cursor.fetchone()[0]
+        if restantes == 0:
+          # Insere um registro marcador vazio para manter o concurso fixo no sistema
+          cursor.execute(
+              """
+              INSERT INTO edital_config (perfil, concurso_nome, materia, qtd_questoes, peso)
+              VALUES (%s, %s, '', 0, 1.0)
+              ON CONFLICT (perfil, concurso_nome, materia) DO NOTHING
+              """,
+              (perfil, concurso_nome.strip())
+          )
+
         conn.commit()
     st.cache_data.clear()
 
@@ -298,7 +321,7 @@ class DatabaseManager:
               (perfil,),
           )
         return {
-            row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall()
+            row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall() if row[0]
         }
 
   def obter_concursos_cadastrados(self, perfil="Watson"):
@@ -511,7 +534,8 @@ class DatabaseManager:
         edital_items = {}
         for row in edital_rows:
           mat, qtd, peso, conc = row
-          edital_items[(conc, mat)] = {"qtd": qtd, "peso": peso}
+          if mat:  # Ignora o marcador vazio de concurso sem matérias
+            edital_items[(conc, mat)] = {"qtd": qtd, "peso": peso}
 
         if concurso_ativo and concurso_ativo != "Todos" and concurso_ativo.strip():
           cursor.execute(
@@ -871,36 +895,39 @@ if menu == "📊 Dashboard":
   )
   st.subheader(titulo_analise)
 
-  for item in dados["materias_detalhes"]:
-    with st.container(border=True):
-      cols = st.columns([3, 1])
-      with cols[0]:
-        st.markdown(
-            f"### 📚 {item['materia']} <span style='font-size: 0.8em; color:"
-            f" gray;'>({item['concurso_nome']})</span>",
-            unsafe_allow_html=True,
-        )
-        taxa_mat = item["taxa_acerto"]
-        st.progress(
-            int(taxa_mat) if taxa_mat <= 100 else 100,
-            text=f"Taxa: {taxa_mat:.1f}%",
-        )
-        txt_stats = (
-            f"**Acertos:** {item.get('certas', 0)} | **Erros:**"
-            f" {item.get('erradas', 0)} | **Total Resolvidas:** {item['tentativas']} | **Edital:** {item['qtd_prova']}"
-            f" q. (Peso {item['peso']:.1f})"
-        )
-        st.markdown(txt_stats)
-      with cols[1]:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button(
-            "🗑️ Excluir Matéria",
-            key=f"del_mat_{item['concurso_nome']}_{item['materia']}",
-        ):
-          db.remover_materia_edital(
-              perfil_atual, item["concurso_nome"], item["materia"]
+  if not dados["materias_detalhes"]:
+    st.info("Nenhuma matéria cadastrada neste concurso ainda. Adicione uma acima!")
+  else:
+    for item in dados["materias_detalhes"]:
+      with st.container(border=True):
+        cols = st.columns([3, 1])
+        with cols[0]:
+          st.markdown(
+              f"### 📚 {item['materia']} <span style='font-size: 0.8em; color:"
+              f" gray;'>({item['concurso_nome']})</span>",
+              unsafe_allow_html=True,
           )
-          st.rerun()
+          taxa_mat = item["taxa_acerto"]
+          st.progress(
+              int(taxa_mat) if taxa_mat <= 100 else 100,
+              text=f"Taxa: {taxa_mat:.1f}%",
+          )
+          txt_stats = (
+              f"**Acertos:** {item.get('certas', 0)} | **Erros:**"
+              f" {item.get('erradas', 0)} | **Total Resolvidas:** {item['tentativas']} | **Edital:** {item['qtd_prova']}"
+              f" q. (Peso {item['peso']:.1f})"
+          )
+          st.markdown(txt_stats)
+        with cols[1]:
+          st.markdown("<br>", unsafe_allow_html=True)
+          if st.button(
+              "🗑️ Excluir Matéria",
+              key=f"del_mat_{item['concurso_nome']}_{item['materia']}",
+          ):
+            db.remover_materia_edital(
+                perfil_atual, item["concurso_nome"], item["materia"]
+            )
+            st.rerun()
 
 elif menu == "📖 Questões":
   st.title(f"📖 Resolução de Questões ({perfil_atual})")
