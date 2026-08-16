@@ -108,7 +108,7 @@ class DatabaseManager:
             "ALTER TABLE questoes ADD COLUMN materia TEXT DEFAULT ''"
         )
 
-      # Verificando e migrando edital_config para incluir cargo por chave composta
+      # Verificação e migração robusta de edital_config
       cursor.execute(
           "SELECT name FROM sqlite_master WHERE type='table' AND"
           " name='edital_config'"
@@ -119,10 +119,27 @@ class DatabaseManager:
         cursor.execute("PRAGMA table_info(edital_config)")
         edital_cols = [col[1] for col in cursor.fetchall()]
         if "cargo" not in edital_cols:
-          cursor.execute(
-              "ALTER TABLE edital_config RENAME TO edital_config_old"
-          )
-          cursor.execute("""
+          try:
+            cursor.execute(
+                "ALTER TABLE edital_config RENAME TO edital_config_old"
+            )
+            cursor.execute("""
+                        CREATE TABLE edital_config (
+                            cargo TEXT DEFAULT 'Geral',
+                            materia TEXT,
+                            qtd_questoes INTEGER DEFAULT 0,
+                            peso REAL DEFAULT 1.0,
+                            PRIMARY KEY (cargo, materia)
+                        )
+                        """)
+            cursor.execute("""
+                        INSERT OR IGNORE INTO edital_config (cargo, materia, qtd_questoes, peso)
+                        SELECT 'Geral', materia, qtd_questoes, peso FROM edital_config_old
+                    """)
+            cursor.execute("DROP TABLE IF EXISTS edital_config_old")
+          except Exception:
+            cursor.execute("DROP TABLE IF EXISTS edital_config")
+            cursor.execute("""
                     CREATE TABLE edital_config (
                         cargo TEXT DEFAULT 'Geral',
                         materia TEXT,
@@ -131,14 +148,6 @@ class DatabaseManager:
                         PRIMARY KEY (cargo, materia)
                     )
                     """)
-          try:
-            cursor.execute("""
-                        INSERT OR IGNORE INTO edital_config (cargo, materia, qtd_questoes, peso)
-                        SELECT 'Geral', materia, qtd_questoes, peso FROM edital_config_old
-                    """)
-          except Exception:
-            pass
-          cursor.execute("DROP TABLE IF EXISTS edital_config_old")
       else:
         cursor.execute("""
                 CREATE TABLE edital_config (
