@@ -597,7 +597,9 @@ if menu == "📊 Dashboard":
       st.metric("Resoluções Certas", certas, delta="Acertos")
   with col3:
     with st.container(border=True):
-      st.metric("Resoluções Erradas", erradas, delta="Erros", delta_color="inverse")
+      st.metric(
+          "Resoluções Erradas", erradas, delta="Erros", delta_color="inverse"
+      )
   with col4:
     with st.container(border=True):
       st.metric("Taxa de Acerto", f"{taxa:.2f}%")
@@ -619,7 +621,7 @@ if menu == "📊 Dashboard":
       st.metric("⚠️ PONTO CEGO (MAIOR DEFICIT)", dados["materia_mais_critica"])
 
   st.markdown("---")
-  
+
   with st.container(border=True):
     st.subheader("⚙️ Configurar Concurso e Edital")
     with st.form("form_concurso"):
@@ -687,7 +689,8 @@ if menu == "📊 Dashboard":
         st.markdown(f"### 📚 {item['materia']}")
         taxa_mat = item["taxa_acerto"]
         st.progress(
-            int(taxa_mat) if taxa_mat <= 100 else 100, text=f"Taxa: {taxa_mat:.1f}%"
+            int(taxa_mat) if taxa_mat <= 100 else 100,
+            text=f"Taxa: {taxa_mat:.1f}%",
         )
         txt_stats = (
             f"**Acertos:** {item.get('certas', 0)} | **Erros:**"
@@ -756,10 +759,13 @@ elif menu == "📖 Questões":
 
         if erros_cons >= 3:
           st.error(
-              f"🚨 ALERTA CRÍTICO: Você errou esta questão {erros_cons}x seguidas!"
+              f"🚨 ALERTA CRÍTICO: Você errou esta questão {erros_cons}x"
+              " seguidas!"
           )
         elif erros_cons == 2:
-          st.warning("⚠️ ERRO RECORRENTE: Você errou esta questão nas últimas 2x!")
+          st.warning(
+              "⚠️ ERRO RECORRENTE: Você errou esta questão nas últimas 2x!"
+          )
 
         st.markdown("### Enunciado")
         st.info(enunciado)
@@ -844,16 +850,25 @@ elif menu == "📖 Questões":
     else:
       st.info("Você concluiu todas as questões carregadas neste caderno!")
   else:
-    st.info("Utilize os filtros acima e clique em 'Carregar Questões' para iniciar.")
+    st.info(
+        "Utilize os filtros acima e clique em 'Carregar Questões' para iniciar."
+    )
 
 elif menu == "➕ Cadastrar":
   st.title("➕ Nova Questão & Automação Inteligente")
 
-  with st.expander("📝 Colar Texto Completo da Questão (IA Separa em A, B, C, D, E)", expanded=True):
+  with st.expander(
+      "📝 Colar Texto Completo da Questão (IA Separa em A, B, C, D, E)",
+      expanded=True,
+  ):
     texto_bruto_input = st.text_area(
-        "Cole aqui o texto inteiro da questão (incluindo o enunciado, as alternativas A, B, C, D, E e opcionalmente gabarito/explicação):",
+        "Cole aqui o texto inteiro da questão (incluindo o enunciado, as"
+        " alternativas A, B, C, D, E e opcionalmente gabarito/explicação):",
         height=150,
-        placeholder="Ex: Acerca da Lei 8.666/93, assinale a alternativa correta...\nLetra A: ...\nLetra B: ..."
+        placeholder=(
+            "Ex: Acerca da Lei 8.666/93, assinale a alternativa"
+            " correta...\nLetra A: ...\nLetra B: ..."
+        ),
     )
     if st.button("⚡ Processar e Separar com IA"):
       if texto_bruto_input.strip():
@@ -861,22 +876,39 @@ elif menu == "➕ Cadastrar":
           resultado_analise = db.processar_texto_questao_com_ia(texto_bruto_input)
 
           def extrair_tag(tag, texto):
-            match = re.search(rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL)
+            match = re.search(
+                rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL
+            )
             return match.group(1).strip() if match else ""
 
-          st.session_state.form_enunciado = extrair_tag("ENUNCIADO", resultado_analise)
-          st.session_state.form_op_a = extrair_tag("ALTERNATIVA_A", resultado_analise)
-          st.session_state.form_op_b = extrair_tag("ALTERNATIVA_B", resultado_analise)
-          st.session_state.form_op_c = extrair_tag("ALTERNATIVA_C", resultado_analise)
-          st.session_state.form_op_d = extrair_tag("ALTERNATIVA_D", resultado_analise)
-          st.session_state.form_op_e = extrair_tag("ALTERNATIVA_E", resultado_analise)
-          
+          st.session_state.form_enunciado = extrair_tag(
+              "ENUNCIADO", resultado_analise
+          )
+          st.session_state.form_op_a = extrair_tag(
+              "ALTERNATIVA_A", resultado_analise
+          )
+          st.session_state.form_op_b = extrair_tag(
+              "ALTERNATIVA_B", resultado_analise
+          )
+          st.session_state.form_op_c = extrair_tag(
+              "ALTERNATIVA_C", resultado_analise
+          )
+          st.session_state.form_op_d = extrair_tag(
+              "ALTERNATIVA_D", resultado_analise
+          )
+          st.session_state.form_op_e = extrair_tag(
+              "ALTERNATIVA_E", resultado_analise
+          )
+
           gab_extraido = extrair_tag("GABARITO", resultado_analise).upper()
           if gab_extraido in ["A", "B", "C", "D", "E"]:
             st.session_state.form_gabarito = gab_extraido
-            
-          st.session_state.form_explicacao = extrair_tag("EXPLICACAO", resultado_analise)
-          st.success("Texto processado e separado com sucesso nos campos abaixo para sua revisão!")
+
+          st.session_state.form_explicacao = extrair_tag(
+              "EXPLICACAO", resultado_analise
+          )
+          st.success("Texto processado com sucesso!")
+          st.rerun()  # Atualiza a página instantaneamente para preencher os campos abaixo
       else:
         st.warning("Cole o texto da questão antes de processar.")
 
@@ -889,24 +921,41 @@ elif menu == "➕ Cadastrar":
         with open("temp_img.png", "wb") as f:
           f.write(imagem_file.getbuffer())
         resposta_ia = db.ler_questao_por_imagem("temp_img.png")
-        
+
         def extrair_tag_img(tag, texto):
-          match = re.search(rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL)
+          match = re.search(
+              rf"{tag}:\s*(.*?)(?=\n[A-Z_]+:|$)", texto, re.DOTALL
+          )
           return match.group(1).strip() if match else ""
 
-        st.session_state.form_enunciado = extrair_tag_img("ENUNCIADO", resposta_ia)
-        st.session_state.form_op_a = extrair_tag_img("ALTERNATIVA_A", resposta_ia)
-        st.session_state.form_op_b = extrair_tag_img("ALTERNATIVA_B", resposta_ia)
-        st.session_state.form_op_c = extrair_tag_img("ALTERNATIVA_C", resposta_ia)
-        st.session_state.form_op_d = extrair_tag_img("ALTERNATIVA_D", resposta_ia)
-        st.session_state.form_op_e = extrair_tag_img("ALTERNATIVA_E", resposta_ia)
-        
+        st.session_state.form_enunciado = extrair_tag_img(
+            "ENUNCIADO", resposta_ia
+        )
+        st.session_state.form_op_a = extrair_tag_img(
+            "ALTERNATIVA_A", resposta_ia
+        )
+        st.session_state.form_op_b = extrair_tag_img(
+            "ALTERNATIVA_B", resposta_ia
+        )
+        st.session_state.form_op_c = extrair_tag_img(
+            "ALTERNATIVA_C", resposta_ia
+        )
+        st.session_state.form_op_d = extrair_tag_img(
+            "ALTERNATIVA_D", resposta_ia
+        )
+        st.session_state.form_op_e = extrair_tag_img(
+            "ALTERNATIVA_E", resposta_ia
+        )
+
         gab_img = extrair_tag_img("GABARITO", resposta_ia).upper()
         if gab_img in ["A", "B", "C", "D", "E"]:
           st.session_state.form_gabarito = gab_img
-          
-        st.session_state.form_explicacao = extrair_tag_img("EXPLICACAO", resposta_ia)
-        st.success("Imagem lida e separada pela IA! Verifique os dados abaixo.")
+
+        st.session_state.form_explicacao = extrair_tag_img(
+            "EXPLICACAO", resposta_ia
+        )
+        st.success("Imagem lida com sucesso!")
+        st.rerun()  # Atualiza a página instantaneamente
 
   cargos_iniciais = db.obter_cargos_totais()
   if not cargos_iniciais:
@@ -916,10 +965,16 @@ elif menu == "➕ Cadastrar":
   st.subheader("📝 Formulário de Revisão e Cadastro")
 
   with st.form("form_cadastrar_questao"):
-    cad_cargo = st.selectbox("Cargo / Concurso", cargos_iniciais, key="cad_cargo")
+    cad_cargo = st.selectbox(
+        "Cargo / Concurso", cargos_iniciais, key="cad_cargo"
+    )
     cad_materia = st.text_input("Matéria (ex: Português)", key="cad_materia")
-    
-    cad_enunciado = st.text_area("Enunciado da Questão", value=st.session_state.form_enunciado, height=120)
+
+    cad_enunciado = st.text_area(
+        "Enunciado da Questão",
+        value=st.session_state.form_enunciado,
+        height=120,
+    )
 
     c_op1, c_op2 = st.columns(2)
     with c_op1:
@@ -936,8 +991,14 @@ elif menu == "➕ Cadastrar":
     except ValueError:
       idx_gab = 0
 
-    cad_gabarito = st.selectbox("Gabarito Oficial", opcoes_gabarito_possiveis, index=idx_gab)
-    cad_explicacao = st.text_area("Explicação / Comentário", value=st.session_state.form_explicacao, height=100)
+    cad_gabarito = st.selectbox(
+        "Gabarito Oficial", opcoes_gabarito_possiveis, index=idx_gab
+    )
+    cad_explicacao = st.text_area(
+        "Explicação / Comentário",
+        value=st.session_state.form_explicacao,
+        height=100,
+    )
 
     if st.form_submit_button("💾 Salvar Questão Definitivamente"):
       if (
