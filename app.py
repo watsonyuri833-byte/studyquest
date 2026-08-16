@@ -2,7 +2,7 @@ import datetime
 import os
 import re
 from PIL import Image
-import google.generativeai as genai
+from google import genai
 import psycopg2
 import streamlit as st
 
@@ -40,10 +40,11 @@ st.markdown(
 )
 
 # ==============================================================================
-# CONFIGURAÇÃO DA API DO GEMINI (SDK CLÁSSICO ESTÁVEL)
+# CONFIGURAÇÃO DO NOVO CLIENTE DA API DO GEMINI
 # ==============================================================================
+client = None
 if "GEMINI_API_KEY" in st.secrets:
-  genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+  client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 
 # ==============================================================================
@@ -58,8 +59,9 @@ class DatabaseManager:
     return psycopg2.connect(self.conn_str)
 
   def resolver_questao_com_ia(self, enunciado, opcoes_dict):
+    if not client:
+      return "Erro: Chave da API do Gemini não configurada nos secrets."
     try:
-      model = genai.GenerativeModel("gemini-2.0-flash")
       opcoes_formatadas = "\n".join(
           [f"{k}) {v}" for k, v in opcoes_dict.items() if v and v.strip()]
       )
@@ -77,16 +79,19 @@ class DatabaseManager:
             RESPOSTA: [Letra]
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
-      response = model.generate_content(
-          prompt, generation_config={"temperature": 0.1}
+      response = client.models.generate_content(
+          model="gemini-2.0-flash",
+          contents=prompt,
+          config={"temperature": 0.1},
       )
       return response.text
     except Exception as e:
       return f"Erro ao consultar a IA: {str(e)}"
 
   def processar_texto_questao_com_ia(self, texto_bruto):
+    if not client:
+      return "Erro: Chave da API do Gemini não configurada nos secrets."
     try:
-      model = genai.GenerativeModel("gemini-2.0-flash")
       prompt = f"""
             Atue como um especialista em processamento de dados para concursos públicos. 
             Analise o texto bruto da questão abaixo e organize-o obrigatoriamente no seguinte formato estruturado:
@@ -102,16 +107,19 @@ class DatabaseManager:
             Texto Bruto da Questão:
             {texto_bruto}
             """
-      response = model.generate_content(
-          prompt, generation_config={"temperature": 0.1}
+      response = client.models.generate_content(
+          model="gemini-2.0-flash",
+          contents=prompt,
+          config={"temperature": 0.1},
       )
       return response.text
     except Exception as e:
       return f"Erro ao processar texto com IA: {str(e)}"
 
   def ler_questao_por_imagem(self, image_path):
+    if not client:
+      return "Erro: Chave da API do Gemini não configurada nos secrets."
     try:
-      model = genai.GenerativeModel("gemini-2.0-flash")
       imagem = Image.open(image_path)
       prompt = """
             Analise a imagem anexada, contendo uma questão de concurso.
@@ -125,8 +133,10 @@ class DatabaseManager:
             GABARITO: [...]
             EXPLICACAO: [...]
             """
-      response = model.generate_content(
-          [prompt, imagem], generation_config={"temperature": 0.1}
+      response = client.models.generate_content(
+          model="gemini-2.0-flash",
+          contents=[prompt, imagem],
+          config={"temperature": 0.1},
       )
       return response.text
     except Exception as e:
