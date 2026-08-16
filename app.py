@@ -86,19 +86,12 @@ class DatabaseManager:
       return f"Erro ao consultar a IA: {str(e)}"
 
   def processar_texto_localmente(self, texto_bruto):
-    """Processa e separa o texto bruto da questão usando Regex localmente,
-
-    garantindo que o enunciado e as alternativas fiquem em seus respectivos
-    campos.
-    """
     try:
-      # Tenta extrair o gabarito se estiver explícito no texto (ex: Gabarito: C)
       gab_match = re.search(
           r"(?:gabarito|resposta)[:\s]*([a-eA-E])", texto_bruto, re.IGNORECASE
       )
       gabarito = gab_match.group(1).upper() if gab_match else "A"
 
-      # Procura padrões de alternativas (A), B., C- etc.) de forma mais flexível
       alt_pattern = re.compile(
           r"(?:^|\n|\r|\s)([A-Ea-e])[\)\.\-]\s+", re.MULTILINE
       )
@@ -210,6 +203,7 @@ class DatabaseManager:
             (perfil, chave, valor),
         )
         conn.commit()
+    st.cache_data.clear()
 
   def remover_config_geral(self, perfil="Watson", chave=""):
     with self.get_connection() as conn:
@@ -219,6 +213,7 @@ class DatabaseManager:
             (perfil, chave),
         )
         conn.commit()
+    st.cache_data.clear()
 
   def obter_config_geral(self, perfil="Watson", chave="", default=""):
     with self.get_connection() as conn:
@@ -252,6 +247,7 @@ class DatabaseManager:
             ),
         )
         conn.commit()
+    st.cache_data.clear()
 
   def remover_materia_edital(self, perfil="Watson", concurso_nome="", materia=""):
     with self.get_connection() as conn:
@@ -262,6 +258,7 @@ class DatabaseManager:
             (perfil, concurso_nome.strip(), materia.strip()),
         )
         conn.commit()
+    st.cache_data.clear()
 
   def deletar_concurso_inteiro(self, perfil="Watson", concurso_nome=""):
     with self.get_connection() as conn:
@@ -272,6 +269,7 @@ class DatabaseManager:
             (perfil, concurso_nome.strip()),
         )
         conn.commit()
+    st.cache_data.clear()
 
   def obter_configs_edital(self, perfil="Watson", concurso_nome=None):
     with self.get_connection() as conn:
@@ -353,7 +351,8 @@ class DatabaseManager:
             (questao_id, resposta_usuario.upper(), acertou),
         )
         conn.commit()
-        return bool(acertou), novo_erros_cons, novo_total_erros
+    st.cache_data.clear()
+    return bool(acertou), novo_erros_cons, novo_total_erros
 
   def obter_questoes(
       self,
@@ -469,6 +468,7 @@ class DatabaseManager:
             ),
         )
         conn.commit()
+    st.cache_data.clear()
 
   def deletar_questao(self, questao_id):
     with self.get_connection() as conn:
@@ -479,27 +479,46 @@ class DatabaseManager:
         )
         cursor.execute("DELETE FROM questoes WHERE id = %s", (questao_id,))
         conn.commit()
+    st.cache_data.clear()
 
   def obter_analise_dashboard(self, perfil="Watson", concurso_ativo=None):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        configs = self.obter_configs_edital(perfil, concurso_ativo)
-        materias_edital = list(configs.keys())
-
-        if concurso_ativo and concurso_ativo != "Todos":
+        if concurso_ativo and concurso_ativo != "Todos" and concurso_ativo.strip():
           cursor.execute(
-              "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
-              " cargo = %s AND materia IS NOT NULL",
-              (perfil, concurso_ativo),
+              "SELECT materia, qtd_questoes, peso, concurso_nome FROM edital_config WHERE"
+              " perfil = %s AND concurso_nome = %s",
+              (perfil, concurso_ativo.strip()),
           )
         else:
           cursor.execute(
-              "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
+              "SELECT materia, qtd_questoes, peso, concurso_nome FROM edital_config WHERE"
+              " perfil = %s",
+              (perfil,),
+          )
+        edital_rows = cursor.fetchall()
+        edital_items = {}
+        for row in edital_rows:
+          mat, qtd, peso, conc = row
+          edital_items[(conc, mat)] = {"qtd": qtd, "peso": peso}
+
+        if concurso_ativo and concurso_ativo != "Todos" and concurso_ativo.strip():
+          cursor.execute(
+              "SELECT DISTINCT materia, COALESCE(NULLIF(cargo, ''), %s) FROM questoes WHERE perfil = %s AND"
+              " cargo = %s AND materia IS NOT NULL",
+              (concurso_ativo.strip(), perfil, concurso_ativo.strip()),
+          )
+        else:
+          cursor.execute(
+              "SELECT DISTINCT materia, COALESCE(NULLIF(cargo, ''), 'Geral') FROM questoes WHERE perfil = %s AND"
               " materia IS NOT NULL",
               (perfil,),
           )
-        materias_questoes = [row[0] for row in cursor.fetchall()]
-        materias = sorted(list(set(materias_edital + materias_questoes)))
+        questoes_rows = cursor.fetchall()
+
+        all_pairs = set(edital_items.keys())
+        for mat, conc in questoes_rows:
+          all_pairs.add((conc, mat))
 
         detalhes_materias = []
         materia_mais_critica = "Nenhuma"
@@ -509,11 +528,11 @@ class DatabaseManager:
         total_erros_geral = 0
         total_tentativas_geral = 0
 
-        if concurso_ativo and concurso_ativo != "Todos":
+        if concurso_ativo and concurso_ativo != "Todos" and concurso_ativo.strip():
           cursor.execute(
               "SELECT COUNT(id) FROM questoes WHERE perfil = %s AND cargo = %s"
               " AND explicacao IS NOT NULL AND TRIM(explicacao) != ''",
-              (perfil, concurso_ativo),
+              (perfil, concurso_ativo.strip()),
           )
         else:
           cursor.execute(
@@ -523,28 +542,18 @@ class DatabaseManager:
           )
         total_comentadas = cursor.fetchone()[0] or 0
 
-        for mat in materias:
-          cfg = configs.get(mat, {"qtd": 0, "peso": 1.0})
+        for conc, mat in sorted(all_pairs, key=lambda x: (x[0], x[1])):
+          cfg = edital_items.get((conc, mat), {"qtd": 0, "peso": 1.0})
           qtd_prova = cfg["qtd"]
           peso = cfg["peso"]
 
-          if concurso_ativo and concurso_ativo != "Todos":
-            cursor.execute(
-                """
-                        SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
-                        FROM questoes WHERE perfil = %s AND cargo = %s AND materia = %s
-                    """,
-                (perfil, concurso_ativo, mat),
-            )
-          else:
-            cursor.execute(
-                """
-                        SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
-                        FROM questoes WHERE perfil = %s AND materia = %s
-                    """,
-                (perfil, mat),
-            )
-
+          cursor.execute(
+              """
+                  SELECT COUNT(id), SUM(total_tentativas), SUM(total_erros) 
+                  FROM questoes WHERE perfil = %s AND (cargo = %s OR (%s = 'Geral' AND (cargo IS NULL OR cargo = ''))) AND materia = %s
+              """,
+              (perfil, conc, conc, mat),
+          )
           q_cad, tent, erros = cursor.fetchone()
           q_cad = q_cad or 0
           tent = tent or 0
@@ -574,9 +583,10 @@ class DatabaseManager:
               and taxa_acerto < 100.0
           ):
             max_pontos_perdidos = pontos_perdidos_mat
-            materia_mais_critica = mat
+            materia_mais_critica = f"{mat} ({conc})"
 
           detalhes_materias.append({
+              "concurso_nome": conc,
               "materia": mat,
               "qtd_prova": qtd_prova,
               "peso": peso,
@@ -854,7 +864,11 @@ if menu == "📊 Dashboard":
     with st.container(border=True):
       cols = st.columns([3, 1])
       with cols[0]:
-        st.markdown(f"### 📚 {item['materia']}")
+        st.markdown(
+            f"### 📚 {item['materia']} <span style='font-size: 0.8em; color:"
+            f" gray;'>({item['concurso_nome']})</span>",
+            unsafe_allow_html=True,
+        )
         taxa_mat = item["taxa_acerto"]
         st.progress(
             int(taxa_mat) if taxa_mat <= 100 else 100,
@@ -868,12 +882,12 @@ if menu == "📊 Dashboard":
         st.markdown(txt_stats)
       with cols[1]:
         st.markdown("<br>", unsafe_allow_html=True)
-        if (
-            st.session_state.concurso_selecionado != "Geral (Todos)"
-            and st.button("🗑️ Excluir Matéria", key=f"del_mat_{item['materia']}")
+        if st.button(
+            "🗑️ Excluir Matéria",
+            key=f"del_mat_{item['concurso_nome']}_{item['materia']}",
         ):
           db.remover_materia_edital(
-              perfil_atual, st.session_state.concurso_selecionado, item["materia"]
+              perfil_atual, item["concurso_nome"], item["materia"]
           )
           st.rerun()
 
