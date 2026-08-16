@@ -121,7 +121,7 @@ class DatabaseManager:
             """
 
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="gemini-2.0-flash",
           contents=prompt,
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -149,7 +149,7 @@ class DatabaseManager:
             """
 
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="gemini-2.0-flash",
           contents=prompt,
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -176,7 +176,7 @@ class DatabaseManager:
             """
 
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="gemini-2.0-flash",
           contents=[prompt, imagem],
           config=types.GenerateContentConfig(temperature=0.1),
       )
@@ -877,7 +877,6 @@ elif menu == "➕ Cadastrar":
           if resultado_analise.startswith("Erro"):
             st.error(resultado_analise)
           else:
-            # Limpeza de formatação markdown caso a IA envie asteriscos
             texto_limpo_ia = (
                 resultado_analise.replace("**", "")
                 .replace("*", "")
@@ -900,7 +899,6 @@ elif menu == "➕ Cadastrar":
             gab_ext = extrair_tag("GABARITO", texto_limpo_ia).upper()
             exp_ext = extrair_tag("EXPLICACAO", texto_limpo_ia)
 
-            # Só atualiza se encontrar ao menos o enunciado ou a opção A
             if enunciado_ext or op_a_ext:
               st.session_state.form_enunciado = (
                   enunciado_ext or texto_bruto_input
