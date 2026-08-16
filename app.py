@@ -88,7 +88,8 @@ class DatabaseManager:
   def processar_texto_localmente(self, texto_bruto):
     """Processa e separa o texto bruto da questão usando Regex localmente,
 
-    eliminando qualquer erro de requisição de API externa.
+    garantindo que o enunciado e as alternativas fiquem em seus respectivos
+    campos.
     """
     try:
       # Tenta extrair o gabarito se estiver explícito no texto (ex: Gabarito: C)
@@ -97,16 +98,17 @@ class DatabaseManager:
       )
       gabarito = gab_match.group(1).upper() if gab_match else "A"
 
-      # Procura padrões de alternativas (A), B), C), D), E) ou a., b., etc.)
+      # Procura padrões de alternativas (A), B., C- etc.) de forma mais flexível
       alt_pattern = re.compile(
-          r"(?:^|\n)\s*([A-Ea-e])[\)\.\-]\s*", re.MULTILINE
+          r"(?:^|\n|\r|\s)([A-Ea-e])[\)\.\-]\s+", re.MULTILINE
       )
       matches = list(alt_pattern.finditer(texto_bruto))
 
       enunciado = texto_bruto
       op_a, op_b, op_c, op_d, op_e = "", "", "", "", ""
 
-      if len(matches) >= 2:
+      if matches:
+        # O enunciado é tudo o que vem antes da primeira alternativa encontrada
         enunciado = texto_bruto[: matches[0].start()].strip()
         alt_texts = {}
 
@@ -126,7 +128,7 @@ class DatabaseManager:
         op_d = alt_texts.get("D", "")
         op_e = alt_texts.get("E", "")
 
-        # Limpa vestígios de gabarito no final da última alternativa
+        # Limpa vestígios de gabarito ou texto extra no final da última alternativa
         for letra, val in [
             ("A", op_a),
             ("B", op_b),
