@@ -20,24 +20,18 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* Aumenta o espaçamento vertical entre os itens do menu (radio) */
         div.stRadio > div[role="radiogroup"] {
             gap: 14px !important;
         }
-        
-        /* Torna as bolinhas do radio bem visíveis com borda clara e fundo adequado */
         div.stRadio [data-baseweb="radio"] div:first-child {
             background-color: #1e1e1e !important;
-            border: 2px solid #00D26A !important; /* Borda destacada */
+            border: 2px solid #00D26A !important;
         }
-        
-        /* Adiciona um espaçamento interno e efeito hover elegante nas opções */
         div.stRadio label {
             padding: 6px 10px !important;
             border-radius: 8px;
             transition: background 0.2s ease;
         }
-        
         div.stRadio label:hover {
             background-color: rgba(255, 255, 255, 0.07) !important;
         }
@@ -108,7 +102,6 @@ class DatabaseManager:
             "ALTER TABLE questoes ADD COLUMN materia TEXT DEFAULT ''"
         )
 
-      # Verificação e migração robusta de edital_config
       cursor.execute(
           "SELECT name FROM sqlite_master WHERE type='table' AND"
           " name='edital_config'"
@@ -627,7 +620,6 @@ def get_db():
 
 db = get_db()
 
-# Inicialização do Session State
 if "questoes_lista" not in st.session_state:
   st.session_state.questoes_lista = []
 if "indice_atual" not in st.session_state:
