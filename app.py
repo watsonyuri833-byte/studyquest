@@ -230,10 +230,9 @@ class DatabaseManager:
   ):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        # Se estiver adicionando uma matéria real, remove o placeholder vazio se existir
         if materia.strip():
           cursor.execute(
-              "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome = %s AND (materia = '' OR materia IS NULL)",
+              "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome = %s AND (materia = '' OR materia ILIKE 'geral')",
               (perfil, concurso_nome.strip())
           )
         cursor.execute(
@@ -258,13 +257,11 @@ class DatabaseManager:
   def remover_materia_edital(self, perfil="Watson", concurso_nome="", materia=""):
     with self.get_connection() as conn:
       with conn.cursor() as cursor:
-        # Remove do edital_config
         cursor.execute(
             "DELETE FROM edital_config WHERE perfil = %s AND concurso_nome ="
             " %s AND materia = %s",
             (perfil, concurso_nome.strip(), materia.strip()),
         )
-        # Remove também as questões associadas para evitar ressurgimento automático
         cursor.execute(
             "SELECT id FROM questoes WHERE perfil = %s AND cargo = %s AND materia = %s",
             (perfil, concurso_nome.strip(), materia.strip())
@@ -274,14 +271,12 @@ class DatabaseManager:
           cursor.execute("DELETE FROM historico_respostas WHERE questao_id = %s", (q_id,))
           cursor.execute("DELETE FROM questoes WHERE id = %s", (q_id,))
         
-        # Verifica se ainda restou alguma matéria cadastrada para este concurso
         cursor.execute(
-            "SELECT COUNT(*) FROM edital_config WHERE perfil = %s AND concurso_nome = %s AND materia != '' AND materia IS NOT NULL",
+            "SELECT COUNT(*) FROM edital_config WHERE perfil = %s AND concurso_nome = %s AND materia != '' AND materia ILIKE NOT 'geral'",
             (perfil, concurso_nome.strip())
         )
         restantes = cursor.fetchone()[0]
         if restantes == 0:
-          # Insere um registro marcador vazio para manter o concurso fixo no sistema
           cursor.execute(
               """
               INSERT INTO edital_config (perfil, concurso_nome, materia, qtd_questoes, peso)
@@ -321,7 +316,7 @@ class DatabaseManager:
               (perfil,),
           )
         return {
-            row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall() if row[0]
+            row[0]: {"qtd": row[1], "peso": row[2]} for row in cursor.fetchall() if row[0] and row[0].strip().lower() != "geral"
         }
 
   def obter_concursos_cadastrados(self, perfil="Watson"):
@@ -453,17 +448,17 @@ class DatabaseManager:
               " materia",
               (perfil, cargo),
           )
-          materias_banco = [row[0] for row in cursor.fetchall()]
+          materias_banco = [row[0] for row in cursor.fetchall() if row[0] and row[0].strip().lower() != "geral"]
         else:
           cursor.execute(
               "SELECT DISTINCT materia FROM questoes WHERE perfil = %s AND"
               " materia IS NOT NULL AND materia != '' ORDER BY materia",
               (perfil,),
           )
-          materias_banco = [row[0] for row in cursor.fetchall()]
+          materias_banco = [row[0] for row in cursor.fetchall() if row[0] and row[0].strip().lower() != "geral"]
 
         configs = self.obter_configs_edital(perfil, cargo)
-        materias_edital = list(configs.keys())
+        materias_edital = [m for m in configs.keys() if m and m.strip().lower() != "geral"]
         return sorted(list(set(materias_banco + materias_edital)))
 
   def adicionar_questao(
@@ -534,7 +529,7 @@ class DatabaseManager:
         edital_items = {}
         for row in edital_rows:
           mat, qtd, peso, conc = row
-          if mat:  # Ignora o marcador vazio de concurso sem matérias
+          if mat and mat.strip() and mat.strip().lower() != "geral":
             edital_items[(conc, mat)] = {"qtd": qtd, "peso": peso}
 
         if concurso_ativo and concurso_ativo != "Todos" and concurso_ativo.strip():
@@ -553,7 +548,8 @@ class DatabaseManager:
 
         all_pairs = set(edital_items.keys())
         for mat, conc in questoes_rows:
-          all_pairs.add((conc, mat))
+          if mat and mat.strip() and mat.strip().lower() != "geral":
+            all_pairs.add((conc, mat))
 
         detalhes_materias = []
         materia_mais_critica = "Nenhuma"
@@ -778,7 +774,7 @@ if menu == "📊 Dashboard":
       if st.button("➕ Adicionar Concurso"):
         if novo_concurso_input.strip():
           db.salvar_config_edital(
-              perfil_atual, novo_concurso_input.strip(), "Geral", 10, 1.0
+              perfil_atual, novo_concurso_input.strip(), "", 0, 1.0
           )
           st.session_state.concurso_selecionado = novo_concurso_input.strip()
           st.success(f"Concurso '{novo_concurso_input.strip()}' criado!")
