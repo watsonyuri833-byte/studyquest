@@ -85,6 +85,95 @@ class DatabaseManager:
     except Exception as e:
       return f"Erro ao consultar a IA: {str(e)}"
 
+  def processar_texto_localmente(self, texto_bruto):
+    """Processa e separa o texto bruto da questão usando Regex localmente,
+
+    eliminando qualquer erro de requisição de API externa.
+    """
+    try:
+      # Tenta extrair o gabarito se estiver explícito no texto (ex: Gabarito: C)
+      gab_match = re.search(
+          r"(?:gabarito|resposta)[:\s]*([a-eA-E])", texto_bruto, re.IGNORECASE
+      )
+      gabarito = gab_match.group(1).upper() if gab_match else "A"
+
+      # Procura padrões de alternativas (A), B), C), D), E) ou a., b., etc.)
+      alt_pattern = re.compile(
+          r"(?:^|\n)\s*([A-Ea-e])[\)\.\-]\s*", re.MULTILINE
+      )
+      matches = list(alt_pattern.finditer(texto_bruto))
+
+      enunciado = texto_bruto
+      op_a, op_b, op_c, op_d, op_e = "", "", "", "", ""
+
+      if len(matches) >= 2:
+        enunciado = texto_bruto[: matches[0].start()].strip()
+        alt_texts = {}
+
+        for i in range(len(matches)):
+          letra = matches[i].group(1).upper()
+          inicio_conteudo = matches[i].end()
+          fim_conteudo = (
+              matches[i + 1].start()
+              if i + 1 < len(matches)
+              else len(texto_bruto)
+          )
+          alt_texts[letra] = texto_bruto[inicio_conteudo:fim_conteudo].strip()
+
+        op_a = alt_texts.get("A", "")
+        op_b = alt_texts.get("B", "")
+        op_c = alt_texts.get("C", "")
+        op_d = alt_texts.get("D", "")
+        op_e = alt_texts.get("E", "")
+
+        # Limpa vestígios de gabarito no final da última alternativa
+        for letra, val in [
+            ("A", op_a),
+            ("B", op_b),
+            ("C", op_c),
+            ("D", op_d),
+            ("E", op_e),
+        ]:
+          if val:
+            val_limpo = re.sub(
+                r"\n+\s*(?:gabarito|resposta)[:\s]*[A-E].*",
+                "",
+                val,
+                flags=re.IGNORECASE,
+            ).strip()
+            if letra == "A":
+              op_a = val_limpo
+            elif letra == "B":
+              op_b = val_limpo
+            elif letra == "C":
+              op_c = val_limpo
+            elif letra == "D":
+              op_d = val_limpo
+            elif letra == "E":
+              op_e = val_limpo
+
+      return {
+          "enunciado": enunciado,
+          "op_a": op_a,
+          "op_b": op_b,
+          "op_c": op_c,
+          "op_d": op_d,
+          "op_e": op_e,
+          "gabarito": gabarito,
+          "explicacao": "",
+      }
+    except Exception as e:
+      return {
+          "enunciado": texto_bruto,
+          "op_a": "",
+          "op_b": "",
+          "op_c": "",
+          "op_d": "",
+          "op_e": "",
+          "gabarito": "A",
+          "explicacao": "",
+      }
+
   def processar_texto_questao_com_ia(self, texto_bruto):
     try:
       prompt = f"""
@@ -961,52 +1050,79 @@ elif menu == "➕ Cadastrar":
     texto_bruto_input = st.text_area(
         "Cole aqui o texto inteiro da questão:", height=150
     )
-    if st.button("⚡ Processar e Separar com IA"):
-      if texto_bruto_input.strip():
-        with st.spinner("A IA está analisando e separando o texto..."):
-          resultado_analise = db.processar_texto_questao_com_ia(texto_bruto_input)
-          if resultado_analise.startswith("Erro"):
-            st.error(resultado_analise)
-          else:
-            texto_limpo_ia = (
-                resultado_analise.replace("**", "")
-                .replace("*", "")
-                .replace("`", "")
-            )
 
-            def extrair_tag(tag, texto):
-              pattern = (
-                  rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
+    c_btn1, c_btn2 = st.columns(2)
+    with c_btn1:
+      if st.button(
+          "⚡ Separar Automaticamente (Instantâneo / Sem Erros)",
+          use_container_width=True,
+      ):
+        if texto_bruto_input.strip():
+          dados_separados = db.processar_texto_localmente(texto_bruto_input)
+          st.session_state.form_enunciado = dados_separados["enunciado"]
+          st.session_state.form_op_a = dados_separados["op_a"]
+          st.session_state.form_op_b = dados_separados["op_b"]
+          st.session_state.form_op_c = dados_separados["op_c"]
+          st.session_state.form_op_d = dados_separados["op_d"]
+          st.session_state.form_op_e = dados_separados["op_e"]
+          st.session_state.form_gabarito = dados_separados["gabarito"]
+          st.session_state.form_explicacao = dados_separados["explicacao"]
+          st.success("Texto separado com sucesso localmente!")
+          st.rerun()
+        else:
+          st.warning("Cole o texto da questão primeiro!")
+
+    with c_btn2:
+      if st.button(
+          "🤖 Separar com IA (Opcional)", use_container_width=True
+      ):
+        if texto_bruto_input.strip():
+          with st.spinner("A IA está processando..."):
+            resultado_analise = db.processar_texto_questao_com_ia(
+                texto_bruto_input
+            )
+            if resultado_analise.startswith("Erro"):
+              st.error(resultado_analise)
+            else:
+              texto_limpo_ia = (
+                  resultado_analise.replace("**", "")
+                  .replace("*", "")
+                  .replace("`", "")
               )
-              match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
-              return match.group(1).strip() if match else ""
 
-            st.session_state.form_enunciado = (
-                extrair_tag("ENUNCIADO", texto_limpo_ia) or texto_bruto_input
-            )
-            st.session_state.form_op_a = extrair_tag(
-                "ALTERNATIVA_A", texto_limpo_ia
-            )
-            st.session_state.form_op_b = extrair_tag(
-                "ALTERNATIVA_B", texto_limpo_ia
-            )
-            st.session_state.form_op_c = extrair_tag(
-                "ALTERNATIVA_C", texto_limpo_ia
-            )
-            st.session_state.form_op_d = extrair_tag(
-                "ALTERNATIVA_D", texto_limpo_ia
-            )
-            st.session_state.form_op_e = extrair_tag(
-                "ALTERNATIVA_E", texto_limpo_ia
-            )
-            gab = extrair_tag("GABARITO", texto_limpo_ia).upper()
-            if gab and gab[0] in ["A", "B", "C", "D", "E"]:
-              st.session_state.form_gabarito = gab[0]
-            st.session_state.form_explicacao = extrair_tag(
-                "EXPLICACAO", texto_limpo_ia
-            )
-            st.success("Texto processado com sucesso!")
-            st.rerun()
+              def extrair_tag(tag, texto):
+                pattern = rf"(?:^|\n)\s*{tag}\s*:\s*(.*?)(?=\n\s*[A-Z_]{3,}\s*:|\Z)"
+                match = re.search(pattern, texto, re.DOTALL | re.IGNORECASE)
+                return match.group(1).strip() if match else ""
+
+              st.session_state.form_enunciado = (
+                  extrair_tag("ENUNCIADO", texto_limpo_ia) or texto_bruto_input
+              )
+              st.session_state.form_op_a = extrair_tag(
+                  "ALTERNATIVA_A", texto_limpo_ia
+              )
+              st.session_state.form_op_b = extrair_tag(
+                  "ALTERNATIVA_B", texto_limpo_ia
+              )
+              st.session_state.form_op_c = extrair_tag(
+                  "ALTERNATIVA_C", texto_limpo_ia
+              )
+              st.session_state.form_op_d = extrair_tag(
+                  "ALTERNATIVA_D", texto_limpo_ia
+              )
+              st.session_state.form_op_e = extrair_tag(
+                  "ALTERNATIVA_E", texto_limpo_ia
+              )
+              gab = extrair_tag("GABARITO", texto_limpo_ia).upper()
+              if gab and gab[0] in ["A", "B", "C", "D", "E"]:
+                st.session_state.form_gabarito = gab[0]
+              st.session_state.form_explicacao = extrair_tag(
+                  "EXPLICACAO", texto_limpo_ia
+              )
+              st.success("Texto processado com IA com sucesso!")
+              st.rerun()
+        else:
+          st.warning("Cole o texto da questão primeiro!")
 
   with st.expander("🖼️ Leitura por Imagem (Print/Foto da Questão)"):
     imagem_file = st.file_uploader(
