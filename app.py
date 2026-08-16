@@ -80,12 +80,14 @@ class DatabaseManager:
             EXPLICAÇÃO: [Sua explicação detalhada aqui]
             """
       response = client.models.generate_content(
-          model="gemini-2.5-flash",
+          model="models/gemini-1.5-flash",  # Com o prefixo explícito
           contents=prompt,
           config={"temperature": 0.1},
       )
       return response.text
     except Exception as e:
+      # Isso vai imprimir o erro completo no seu terminal onde o Streamlit está rodando
+      print("ERRO DETALHADO DA API DO GEMINI:", repr(e))
       return f"Erro ao consultar a IA: {str(e)}"
 
   def processar_texto_questao_com_ia(self, texto_bruto):
